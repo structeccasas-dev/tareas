@@ -25,6 +25,18 @@ export const PRIORITY_TONE: Record<TaskPriority, BadgeTone> = {
   high: "error",
 }
 
+export const PRIORITY_DOT: Record<TaskPriority, string> = {
+  low: "bg-gray-300",
+  medium: "bg-blue-400",
+  high: "bg-red-400",
+}
+
+export const STATUS_DOT: Record<TaskStatus, string> = {
+  todo: "bg-gray-400",
+  in_progress: "bg-blue-400",
+  done: "bg-primary",
+}
+
 export type DueTone = "overdue" | "today" | "upcoming"
 
 export function getDueTone(date: Date): DueTone {

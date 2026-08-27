@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutGrid, ListChecks, UserCog, LogOut, CheckSquare } from "lucide-react"
+import { LayoutGrid, ListChecks, CalendarDays, UserCog, LogOut, CheckSquare } from "lucide-react"
 import { logout } from "@/lib/auth"
 import { Avatar } from "@/components/Avatar"
 import type { SessionUserSummary, UserRole } from "@/types/users"
@@ -10,6 +10,7 @@ import type { SessionUserSummary, UserRole } from "@/types/users"
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutGrid, roles: null },
   { href: "/tareas", label: "Tareas", icon: ListChecks, roles: null },
+  { href: "/calendario", label: "Calendario", icon: CalendarDays, roles: null },
   { href: "/users", label: "Usuarios", icon: UserCog, roles: ["admin"] },
 ] as const satisfies { href: string; label: string; icon: unknown; roles: UserRole[] | null }[]
 

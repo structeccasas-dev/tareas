@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, lte, not } from "drizzle-orm"
+import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lte, not } from "drizzle-orm"
 import { db } from "@/db"
 import { tasks } from "@/db/schema/task"
 import { users } from "@/db/schema/user"
@@ -87,6 +87,39 @@ export async function getTasksPage(opts: PageOptions): Promise<TaskColumn> {
     }
   } catch {
     return empty
+  }
+}
+
+// Tareas con vencimiento dentro de un rango de fechas — usado por la vista de
+// calendario (día/semana/mes). A diferencia de getTasksPage, no pagina: el
+// rango de fechas ya acota el volumen de resultados.
+export async function getTasksInRange(from: Date, to: Date, filters: TasksFilters = {}): Promise<TaskWithRelations[]> {
+  try {
+    const { search, assignedTo } = filters
+    const s = search?.trim()
+
+    const session = await getSession()
+    if (!session) return []
+
+    const rows = await db
+      .select()
+      .from(tasks)
+      .leftJoin(users, eq(tasks.assignedTo, users.id))
+      .where(
+        and(
+          isNotNull(tasks.dueAt),
+          gte(tasks.dueAt, from),
+          lte(tasks.dueAt, to),
+          s ? ilike(tasks.title, `%${s}%`) : undefined,
+          assignedToCondition(assignedTo),
+          ownershipCondition(session, tasks.assignedTo),
+        ),
+      )
+      .orderBy(asc(tasks.dueAt))
+
+    return rows.map(rowToTask)
+  } catch {
+    return []
   }
 }
 

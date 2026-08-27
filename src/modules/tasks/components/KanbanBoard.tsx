@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react"
 import { User, Clock, Loader2, ChevronLeft, ChevronRight, Maximize2, X, CalendarClock } from "lucide-react"
-import type { TaskWithRelations, TaskStatus, TaskPriority, TasksBoard } from "@/types/tasks"
+import type { TaskWithRelations, TaskStatus, TasksBoard } from "@/types/tasks"
 import { Button } from "@/components/Button"
 import { Avatar } from "@/components/Avatar"
-import { STATUS_LABELS, PRIORITY_LABELS, getDueTone } from "@/modules/tasks/lib/status"
+import { STATUS_LABELS, PRIORITY_LABELS, PRIORITY_DOT, getDueTone } from "@/modules/tasks/lib/status"
 import { formatRelativeTime } from "@/lib/format"
 
 const DUE_TONE_CLASS: Record<"overdue" | "today" | "upcoming", string> = {
@@ -22,12 +22,6 @@ function formatDueDate(date: Date): string {
   return date
     .toLocaleString("es-AR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
     .replace(/[  ]/g, " ")
-}
-
-const PRIORITY_DOT: Record<TaskPriority, string> = {
-  low: "bg-gray-300",
-  medium: "bg-blue-400",
-  high: "bg-red-400",
 }
 
 const COLUMNS: {

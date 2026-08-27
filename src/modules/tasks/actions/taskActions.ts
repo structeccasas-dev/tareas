@@ -9,9 +9,9 @@ import { getSession } from "@/lib/session"
 import { logActivity } from "@/lib/activityLog"
 import { canManageRecord } from "@/lib/permissions"
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/modules/tasks/lib/status"
-import type { TaskStatus, TaskPriority, TaskColumn, TasksFilters } from "@/types/tasks"
+import type { TaskStatus, TaskPriority, TaskColumn, TasksFilters, TaskWithRelations } from "@/types/tasks"
 import type { ActivityEntry } from "@/types/activity"
-import { getTasksPage, getTaskActivity as fetchTaskActivity } from "@/modules/tasks/data/queries"
+import { getTasksPage, getTasksInRange, getTaskActivity as fetchTaskActivity } from "@/modules/tasks/data/queries"
 
 function buildStatusChangeDescription(oldStatus: TaskStatus, newStatus: TaskStatus): string {
   return `Cambió el estado de "${STATUS_LABELS[oldStatus]}" a "${STATUS_LABELS[newStatus]}"`
@@ -205,4 +205,8 @@ export async function getTaskActivity(id: string): Promise<ActivityEntry[]> {
 
 export async function changeTasksPage(status: TaskStatus, page: number, filters: TasksFilters): Promise<TaskColumn> {
   return getTasksPage({ status, limit: 12, page, ...filters })
+}
+
+export async function getCalendarTasks(from: Date, to: Date): Promise<TaskWithRelations[]> {
+  return getTasksInRange(from, to)
 }
