@@ -5,15 +5,17 @@ import { usePathname } from "next/navigation"
 import { AnimatePresence, motion } from "framer-motion"
 import { Menu, X, CheckSquare } from "lucide-react"
 import type { SessionUserSummary, UserRole } from "@/types/users"
+import { NotificationsBell } from "@/modules/notifications/components/NotificationsBell"
 import { Sidebar } from "./Sidebar"
 
 interface MobileNavProps {
   role: UserRole
   user: SessionUserSummary | null
   dueTasksCount?: number
+  unreadCount?: number
 }
 
-export function MobileNav({ role, user, dueTasksCount = 0 }: MobileNavProps) {
+export function MobileNav({ role, user, dueTasksCount = 0, unreadCount = 0 }: MobileNavProps) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
 
@@ -50,7 +52,12 @@ export function MobileNav({ role, user, dueTasksCount = 0 }: MobileNavProps) {
         <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-primary shadow-elevation-xs">
           <CheckSquare className="w-3.5 h-3.5 text-white" strokeWidth={2} />
         </div>
-        <span className="text-sm font-semibold text-gray-900 tracking-tight">Gestión de Tareas</span>
+        <span className="text-sm font-semibold text-gray-900 tracking-tight truncate">Gestión de Tareas</span>
+        {user && (
+          <div className="ml-auto flex-shrink-0">
+            <NotificationsBell initialUnreadCount={unreadCount} />
+          </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -80,7 +87,7 @@ export function MobileNav({ role, user, dueTasksCount = 0 }: MobileNavProps) {
               >
                 <X className="w-4 h-4" />
               </button>
-              <Sidebar role={role} user={user} dueTasksCount={dueTasksCount} />
+              <Sidebar role={role} user={user} dueTasksCount={dueTasksCount} unreadCount={unreadCount} />
             </motion.div>
           </div>
         )}

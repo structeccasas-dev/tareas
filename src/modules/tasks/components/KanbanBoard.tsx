@@ -5,7 +5,7 @@ import { User, Clock, Loader2, ChevronLeft, ChevronRight, Maximize2, X, Calendar
 import type { TaskWithRelations, TaskStatus, TasksBoard } from "@/types/tasks"
 import { Button } from "@/components/Button"
 import { Avatar } from "@/components/Avatar"
-import { STATUS_LABELS, PRIORITY_LABELS, PRIORITY_DOT, getDueTone } from "@/modules/tasks/lib/status"
+import { STATUS_LABELS, PRIORITY_LABELS, PRIORITY_DOT, getDueTone, isClosedStatus } from "@/modules/tasks/lib/status"
 import { formatRelativeTime } from "@/lib/format"
 
 const DUE_TONE_CLASS: Record<"overdue" | "today" | "upcoming", string> = {
@@ -55,6 +55,14 @@ const COLUMNS: {
     dropBg: "bg-primary/10",
     dotColor: "bg-primary",
     borderColor: "border-primary/50",
+  },
+  {
+    status: "cancelled",
+    headerColor: "text-red-600",
+    headerBg: "bg-red-50",
+    dropBg: "bg-red-50",
+    dotColor: "bg-red-400",
+    borderColor: "border-red-300",
   },
 ]
 
@@ -376,7 +384,7 @@ interface KanbanCardProps {
 }
 
 function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete, disabled, draggable = true }: KanbanCardProps) {
-  const isDone = task.status === "done"
+  const isDone = isClosedStatus(task.status)
 
   return (
     <div
@@ -420,7 +428,10 @@ function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete
         ) : (
           <div className="flex items-center gap-1.5">
             <Clock className="w-3 h-3 text-gray-300 flex-shrink-0" strokeWidth={2} />
-            <span className="text-xs text-gray-400">{formatRelativeTime(task.updatedAt)}</span>
+            {/* El texto depende de Date.now(): puede diferir entre SSR e hidratación. */}
+            <span className="text-xs text-gray-400" suppressHydrationWarning>
+              {formatRelativeTime(task.updatedAt)}
+            </span>
           </div>
         )}
       </div>

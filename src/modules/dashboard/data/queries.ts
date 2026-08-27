@@ -12,7 +12,7 @@ import type {
   TaskStatusPoint,
 } from "@/types/dashboard"
 
-const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "done"]
+const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"]
 const ACTIVE_TASK_STATUSES: TaskStatus[] = ["todo", "in_progress"]
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +56,9 @@ export async function getDashboardMetrics(range: DashboardRange): Promise<Dashbo
       db
         .select({ value: count() })
         .from(tasks)
-        .where(and(sql`${tasks.dueAt} is not null`, lte(tasks.dueAt, new Date()), sql`${tasks.status} != 'done'`)),
+        .where(
+          and(sql`${tasks.dueAt} is not null`, lte(tasks.dueAt, new Date()), sql`${tasks.status} not in ('done', 'cancelled')`),
+        ),
     ])
 
     const countByStatus = new Map(statusRows.map((r) => [r.status, Number(r.value)]))
@@ -66,6 +68,7 @@ export async function getDashboardMetrics(range: DashboardRange): Promise<Dashbo
       todoTasks: countByStatus.get("todo") ?? 0,
       inProgressTasks: countByStatus.get("in_progress") ?? 0,
       doneTasks: countByStatus.get("done") ?? 0,
+      cancelledTasks: countByStatus.get("cancelled") ?? 0,
       overdueTasks: Number(overdueRow?.value ?? 0),
       createdInRange: Number(createdRow?.value ?? 0),
       completedInRange: Number(completedRow?.value ?? 0),
@@ -76,6 +79,7 @@ export async function getDashboardMetrics(range: DashboardRange): Promise<Dashbo
       todoTasks: 0,
       inProgressTasks: 0,
       doneTasks: 0,
+      cancelledTasks: 0,
       overdueTasks: 0,
       createdInRange: 0,
       completedInRange: 0,

@@ -2,7 +2,7 @@ import { format } from "date-fns"
 import type { TaskWithRelations } from "@/types/tasks"
 import { Avatar } from "@/components/Avatar"
 import { Badge } from "@/components/Badge"
-import { PRIORITY_DOT, STATUS_DOT, STATUS_LABELS, STATUS_TONE } from "@/modules/tasks/lib/status"
+import { PRIORITY_DOT, STATUS_DOT, STATUS_LABELS, STATUS_TONE, isClosedStatus } from "@/modules/tasks/lib/status"
 
 interface TaskListItemProps {
   task: TaskWithRelations
@@ -12,7 +12,7 @@ interface TaskListItemProps {
 }
 
 export function TaskListItem({ task, onClick, compact = false }: TaskListItemProps) {
-  const isDone = task.status === "done"
+  const isDone = isClosedStatus(task.status)
 
   if (compact) {
     return (

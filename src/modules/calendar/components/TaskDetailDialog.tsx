@@ -6,7 +6,7 @@ import type { TaskWithRelations } from "@/types/tasks"
 import { Dialog } from "@/components/Dialog"
 import { Badge } from "@/components/Badge"
 import { Button } from "@/components/Button"
-import { STATUS_LABELS, STATUS_TONE, PRIORITY_LABELS, PRIORITY_TONE } from "@/modules/tasks/lib/status"
+import { STATUS_LABELS, STATUS_TONE, PRIORITY_LABELS, PRIORITY_TONE, isClosedStatus } from "@/modules/tasks/lib/status"
 
 interface TaskDetailDialogProps {
   task: TaskWithRelations | null
@@ -19,12 +19,13 @@ export function TaskDetailDialog({ task, onClose }: TaskDetailDialogProps) {
       {task && (
         <div className="space-y-4">
           <div>
-            <h3 className={`text-base font-semibold text-gray-900 ${task.status === "done" ? "line-through text-gray-400" : ""}`}>
+            <h3 className={`text-base font-semibold text-gray-900 ${isClosedStatus(task.status) ? "line-through text-gray-400" : ""}`}>
               {task.title}
             </h3>
-            <div className="flex items-center gap-1.5 mt-2">
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
               <Badge tone={STATUS_TONE[task.status]}>{STATUS_LABELS[task.status]}</Badge>
               <Badge tone={PRIORITY_TONE[task.priority]}>Prioridad {PRIORITY_LABELS[task.priority]}</Badge>
+              {task.category && <Badge tone="neutral">{task.category}</Badge>}
             </div>
           </div>
 
@@ -41,6 +42,10 @@ export function TaskDetailDialog({ task, onClose }: TaskDetailDialogProps) {
               <User className="w-4 h-4 text-gray-400 flex-shrink-0" strokeWidth={1.9} />
               {task.assignedUser?.name ?? <span className="text-gray-400 italic">Sin asignar</span>}
             </div>
+            <p className="text-xs text-gray-400">
+              Creado por {task.createdByUser?.name ?? "—"}
+              {task.assignedByUser && <> · Asignado por {task.assignedByUser.name}</>}
+            </p>
           </div>
 
           <div className="flex justify-end pt-2">

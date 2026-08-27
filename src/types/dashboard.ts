@@ -13,6 +13,7 @@ export interface DashboardMetrics {
   todoTasks: number
   inProgressTasks: number
   doneTasks: number
+  cancelledTasks: number
   overdueTasks: number
   createdInRange: number
   completedInRange: number

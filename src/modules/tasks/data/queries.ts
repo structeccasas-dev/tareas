@@ -1,7 +1,9 @@
-import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lte, not } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, not } from "drizzle-orm"
 import { db } from "@/db"
 import { tasks } from "@/db/schema/task"
 import { users } from "@/db/schema/user"
+import { taskComments } from "@/db/schema/taskComment"
 import type {
   TaskStatus,
   TaskWithRelations,
@@ -9,16 +11,19 @@ import type {
   TasksBoard,
   TasksFilters,
   TasksStats,
+  TimelineEntry,
   UserOption,
 } from "@/types/tasks"
 import { UNASSIGNED_SENTINEL } from "@/types/tasks"
 import { getActivity } from "@/lib/activityLog"
-import type { ActivityEntry } from "@/types/activity"
 import { getSession } from "@/lib/session"
 import type { SessionPayload } from "@/lib/session"
 import { ownershipCondition } from "@/lib/permissions"
 
-const STATUSES: TaskStatus[] = ["todo", "in_progress", "done"]
+const STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"]
+
+const creators = alias(users, "creators")
+const assigners = alias(users, "assigners")
 
 function assignedToCondition(assignedTo?: string) {
   if (!assignedTo) return undefined
@@ -26,19 +31,30 @@ function assignedToCondition(assignedTo?: string) {
   return eq(tasks.assignedTo, assignedTo)
 }
 
-function rowToTask(row: { tasks: typeof tasks.$inferSelect; users: typeof users.$inferSelect | null }): TaskWithRelations {
-  const { tasks: t, users: u } = row
+function rowToTask(row: {
+  tasks: typeof tasks.$inferSelect
+  users: typeof users.$inferSelect | null
+  creators: typeof users.$inferSelect | null
+  assigners: typeof users.$inferSelect | null
+}): TaskWithRelations {
+  const { tasks: t, users: u, creators: c, assigners: a } = row
   return {
     id: t.id,
     title: t.title,
     description: t.description,
+    category: t.category,
+    createdBy: t.createdBy,
     assignedTo: t.assignedTo,
+    assignedBy: t.assignedBy,
     status: t.status,
     priority: t.priority,
+    startAt: t.startAt,
     dueAt: t.dueAt,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
     assignedUser: u ? { id: u.id, name: u.name } : null,
+    createdByUser: c ? { id: c.id, name: c.name } : null,
+    assignedByUser: a ? { id: a.id, name: a.name } : null,
   }
 }
 
@@ -70,6 +86,8 @@ export async function getTasksPage(opts: PageOptions): Promise<TaskColumn> {
         .select()
         .from(tasks)
         .leftJoin(users, eq(tasks.assignedTo, users.id))
+        .leftJoin(creators, eq(tasks.createdBy, creators.id))
+        .leftJoin(assigners, eq(tasks.assignedBy, assigners.id))
         .where(whereClause)
         .orderBy(desc(tasks.updatedAt))
         .limit(limit)
@@ -105,6 +123,8 @@ export async function getTasksInRange(from: Date, to: Date, filters: TasksFilter
       .select()
       .from(tasks)
       .leftJoin(users, eq(tasks.assignedTo, users.id))
+      .leftJoin(creators, eq(tasks.createdBy, creators.id))
+      .leftJoin(assigners, eq(tasks.assignedBy, assigners.id))
       .where(
         and(
           isNotNull(tasks.dueAt),
@@ -134,7 +154,7 @@ export async function getTasksStats(filters: TasksFilters): Promise<TasksStats> 
     createdToday: 0,
     overdue: 0,
     completionRate: 0,
-    countsByStatus: { todo: 0, in_progress: 0, done: 0 },
+    countsByStatus: { todo: 0, in_progress: 0, done: 0, cancelled: 0 },
   }
 
   try {
@@ -156,13 +176,13 @@ export async function getTasksStats(filters: TasksFilters): Promise<TasksStats> 
     const startOfToday = new Date()
     startOfToday.setHours(0, 0, 0, 0)
 
-    const countsByStatus: Record<TaskStatus, number> = { todo: 0, in_progress: 0, done: 0 }
+    const countsByStatus: Record<TaskStatus, number> = { todo: 0, in_progress: 0, done: 0, cancelled: 0 }
     let createdToday = 0
     let overdue = 0
     for (const t of rows) {
       countsByStatus[t.status]++
       if (t.createdAt >= startOfToday) createdToday++
-      if (t.status !== "done" && t.dueAt && t.dueAt < now) overdue++
+      if (t.status !== "done" && t.status !== "cancelled" && t.dueAt && t.dueAt < now) overdue++
     }
 
     const total = rows.length
@@ -174,12 +194,32 @@ export async function getTasksStats(filters: TasksFilters): Promise<TasksStats> 
   }
 }
 
-export async function getTaskActivity(taskId: string): Promise<ActivityEntry[]> {
-  return getActivity("task", taskId)
+export async function getTaskTimeline(taskId: string): Promise<TimelineEntry[]> {
+  const [activity, comments] = await Promise.all([
+    getActivity("task", taskId),
+    db
+      .select({ id: taskComments.id, body: taskComments.body, userName: users.name, createdAt: taskComments.createdAt })
+      .from(taskComments)
+      .innerJoin(users, eq(taskComments.userId, users.id))
+      .where(eq(taskComments.taskId, taskId))
+      .orderBy(asc(taskComments.createdAt)),
+  ])
+
+  const entries: TimelineEntry[] = [
+    ...activity.map((a): TimelineEntry => ({ id: a.id, type: "activity", description: a.description, userName: a.userName, createdAt: a.createdAt })),
+    ...comments.map((c): TimelineEntry => ({ id: c.id, type: "comment", description: c.body, userName: c.userName, createdAt: c.createdAt })),
+  ]
+
+  return entries.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 }
 
 function dueTasksCondition(session: Pick<SessionPayload, "role" | "userId">, endOfToday: Date) {
-  return and(isNotNull(tasks.dueAt), lte(tasks.dueAt, endOfToday), not(eq(tasks.status, "done")), ownershipCondition(session, tasks.assignedTo))
+  return and(
+    isNotNull(tasks.dueAt),
+    lte(tasks.dueAt, endOfToday),
+    not(inArray(tasks.status, ["done", "cancelled"])),
+    ownershipCondition(session, tasks.assignedTo),
+  )
 }
 
 export interface DueTask {
@@ -227,22 +267,50 @@ export async function getDueTasksCount(): Promise<number> {
   }
 }
 
-export interface DueTaskForNotification {
+export interface DueSoonOrOverdueTask {
   id: string
   title: string
   dueAt: Date
   assignedTo: string
 }
 
-// Variante sin scope de sesión, para el cron de notificaciones push: trae las
-// tareas vencidas de TODOS los usuarios (no solo el que hace la consulta),
-// agrupables por asignado. A diferencia del badge in-app, compara contra el
-// instante actual (no el fin del día) porque acá sí importa la hora exacta.
-export async function getDueTasksForNotification(): Promise<DueTaskForNotification[]> {
+// Candidatos a notificación "vence pronto" (dentro de las próximas `hoursAhead`
+// horas) que todavía no recibieron ese aviso. Sin scope de sesión: el cron
+// recorre las tareas de todos los usuarios.
+export async function getDueSoonCandidates(hoursAhead = 2): Promise<DueSoonOrOverdueTask[]> {
+  const threshold = new Date(Date.now() + hoursAhead * 60 * 60 * 1000)
   const rows = await db
     .select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, assignedTo: tasks.assignedTo })
     .from(tasks)
-    .where(and(isNotNull(tasks.dueAt), isNotNull(tasks.assignedTo), lte(tasks.dueAt, new Date()), not(eq(tasks.status, "done"))))
+    .where(
+      and(
+        isNotNull(tasks.dueAt),
+        isNotNull(tasks.assignedTo),
+        lte(tasks.dueAt, threshold),
+        gte(tasks.dueAt, new Date()),
+        isNull(tasks.dueSoonNotifiedAt),
+        not(inArray(tasks.status, ["done", "cancelled"])),
+      ),
+    )
+    .orderBy(asc(tasks.dueAt))
+
+  return rows.map((r) => ({ ...r, dueAt: r.dueAt!, assignedTo: r.assignedTo! }))
+}
+
+// Candidatos a notificación "tarea vencida" que todavía no recibieron ese aviso.
+export async function getOverdueCandidates(): Promise<DueSoonOrOverdueTask[]> {
+  const rows = await db
+    .select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, assignedTo: tasks.assignedTo })
+    .from(tasks)
+    .where(
+      and(
+        isNotNull(tasks.dueAt),
+        isNotNull(tasks.assignedTo),
+        lte(tasks.dueAt, new Date()),
+        isNull(tasks.overdueNotifiedAt),
+        not(inArray(tasks.status, ["done", "cancelled"])),
+      ),
+    )
     .orderBy(asc(tasks.dueAt))
 
   return rows.map((r) => ({ ...r, dueAt: r.dueAt!, assignedTo: r.assignedTo! }))

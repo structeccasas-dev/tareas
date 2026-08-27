@@ -1,4 +1,4 @@
-import { ListTodo, Loader, CheckCircle2, AlertTriangle, PlusCircle, CheckCheck } from "lucide-react"
+import { ListTodo, Loader, CheckCircle2, XCircle, AlertTriangle, PlusCircle, CheckCheck } from "lucide-react"
 import { PageHeader } from "@/components/PageHeader"
 import { Card } from "@/components/Card"
 import { BarChart } from "@/components/BarChart"
@@ -25,6 +25,7 @@ const TONE_STROKE: Record<string, string> = {
   neutral: "stroke-gray-400",
   primary: "stroke-primary",
   info: "stroke-blue-500",
+  error: "stroke-red-500",
 }
 
 export default async function DashboardPage({
@@ -50,6 +51,7 @@ export default async function DashboardPage({
     { label: "Para hacer", value: metrics.todoTasks, icon: ListTodo },
     { label: "En progreso", value: metrics.inProgressTasks, icon: Loader },
     { label: "Finalizadas", value: metrics.doneTasks, icon: CheckCircle2 },
+    { label: "Canceladas", value: metrics.cancelledTasks, icon: XCircle },
     { label: "Vencidas", value: metrics.overdueTasks, icon: AlertTriangle },
     { label: "Creadas en el rango", value: metrics.createdInRange, icon: PlusCircle },
     { label: "Finalizadas en el rango", value: metrics.completedInRange, icon: CheckCheck },

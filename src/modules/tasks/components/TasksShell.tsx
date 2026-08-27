@@ -18,10 +18,8 @@ import {
   deleteTask,
   updateTaskStatus,
   changeTasksPage,
-  getTaskActivity,
 } from "@/modules/tasks/actions/taskActions";
 import { Dialog } from "@/components/Dialog";
-import { ActivityHistory } from "@/components/ActivityHistory";
 import { Button } from "@/components/Button";
 import { Input } from "@/components/Input";
 import { Select } from "@/components/Select";
@@ -29,8 +27,9 @@ import { Textarea } from "@/components/Textarea";
 import { PageHeader } from "@/components/PageHeader";
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/modules/tasks/lib/status";
 import { KanbanBoard } from "./KanbanBoard";
+import { TaskTimeline } from "./TaskTimeline";
 
-const ALL_STATUSES: TaskStatus[] = ["todo", "in_progress", "done"];
+const ALL_STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"];
 
 // Formatea en horario local (no toISOString, que corre a UTC y desfasa la hora mostrada).
 function toDatetimeLocalValue(date: Date): string {
@@ -41,18 +40,22 @@ function toDatetimeLocalValue(date: Date): string {
 interface FormState {
   title: string;
   description: string;
+  category: string;
   assignedTo: string;
   status: TaskStatus;
   priority: TaskPriority;
+  startAt: string;
   dueAt: string;
 }
 
 const EMPTY_FORM: FormState = {
   title: "",
   description: "",
+  category: "",
   assignedTo: "",
   status: "todo",
   priority: "medium",
+  startAt: "",
   dueAt: "",
 };
 
@@ -201,9 +204,11 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
     setForm({
       title: task.title,
       description: task.description ?? "",
+      category: task.category ?? "",
       assignedTo: task.assignedTo ?? "",
       status: task.status,
       priority: task.priority,
+      startAt: task.startAt ? toDatetimeLocalValue(task.startAt) : "",
       dueAt: task.dueAt ? toDatetimeLocalValue(task.dueAt) : "",
     });
     setFormError(null);
@@ -216,9 +221,11 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
     const data = {
       title: form.title,
       description: form.description || null,
+      category: form.category || null,
       assignedTo: form.assignedTo || null,
       status: form.status,
       priority: form.priority,
+      startAt: form.startAt ? new Date(form.startAt) : null,
       dueAt: form.dueAt ? new Date(form.dueAt) : null,
     };
     startTransition(async () => {
@@ -312,6 +319,12 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
 
       {/* Create / Edit dialog */}
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} title={editingTask ? "Editar tarea" : "Nueva tarea"} size="lg">
+        {editingTask && (
+          <p className="text-xs text-gray-400 mb-4">
+            Creado por {editingTask.createdByUser?.name ?? "—"}
+            {editingTask.assignedByUser && <> · Asignado por {editingTask.assignedByUser.name}</>}
+          </p>
+        )}
         <form onSubmit={handleFormSubmit} className="space-y-4">
           <Field label="Título">
             <Input
@@ -320,6 +333,15 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
               placeholder="Ej. Preparar reporte mensual"
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+            />
+          </Field>
+
+          <Field label="Categoría (opcional)">
+            <Input
+              type="text"
+              placeholder="Ej. Ventas, Soporte, Administración..."
+              value={form.category}
+              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
             />
           </Field>
 
@@ -360,13 +382,22 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
             </Field>
           </div>
 
-          <Field label="Vencimiento (opcional)">
-            <Input
-              type="datetime-local"
-              value={form.dueAt}
-              onChange={(e) => setForm((f) => ({ ...f, dueAt: e.target.value }))}
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Fecha de inicio (opcional)">
+              <Input
+                type="datetime-local"
+                value={form.startAt}
+                onChange={(e) => setForm((f) => ({ ...f, startAt: e.target.value }))}
+              />
+            </Field>
+            <Field label="Fecha límite (opcional)">
+              <Input
+                type="datetime-local"
+                value={form.dueAt}
+                onChange={(e) => setForm((f) => ({ ...f, dueAt: e.target.value }))}
+              />
+            </Field>
+          </div>
 
           <Field label="Descripción">
             <Textarea
@@ -392,8 +423,8 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
         </form>
         {editingTask && (
           <div className="mt-5 pt-4 border-t border-border">
-            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Historial de actividad</h3>
-            <ActivityHistory entityId={editingTask.id} fetchAction={getTaskActivity} />
+            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Actividad</h3>
+            <TaskTimeline taskId={editingTask.id} />
           </div>
         )}
       </Dialog>

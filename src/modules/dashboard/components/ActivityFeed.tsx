@@ -38,7 +38,10 @@ export function ActivityFeed({ items }: ActivityFeedProps) {
                   <p className="text-sm font-medium text-gray-900">{item.title}</p>
                   {item.subtitle && <p className="text-xs text-gray-500 truncate">{item.subtitle}</p>}
                 </div>
-                <span className="text-xs text-gray-400 flex-shrink-0">{formatRelativeTime(item.createdAt)}</span>
+                {/* El texto depende de Date.now(): puede diferir entre SSR e hidratación. */}
+                <span className="text-xs text-gray-400 flex-shrink-0" suppressHydrationWarning>
+                  {formatRelativeTime(item.createdAt)}
+                </span>
               </li>
             )
           })}

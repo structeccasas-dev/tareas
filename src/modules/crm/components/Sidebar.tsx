@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 import { LayoutGrid, ListChecks, CalendarDays, UserCog, LogOut, CheckSquare } from "lucide-react"
 import { logout } from "@/lib/auth"
 import { Avatar } from "@/components/Avatar"
+import { NotificationsBell } from "@/modules/notifications/components/NotificationsBell"
 import type { SessionUserSummary, UserRole } from "@/types/users"
 
 const NAV_ITEMS = [
@@ -18,9 +19,10 @@ interface SidebarProps {
   role: UserRole
   user: SessionUserSummary | null
   dueTasksCount?: number
+  unreadCount?: number
 }
 
-export function Sidebar({ role, user, dueTasksCount = 0 }: SidebarProps) {
+export function Sidebar({ role, user, dueTasksCount = 0, unreadCount = 0 }: SidebarProps) {
   const pathname = usePathname()
 
   function isActive(href: string) {
@@ -35,7 +37,12 @@ export function Sidebar({ role, user, dueTasksCount = 0 }: SidebarProps) {
         <div className="w-7 h-7 bg-primary rounded-xl flex items-center justify-center flex-shrink-0 shadow-elevation-xs">
           <CheckSquare className="w-4 h-4 text-white" strokeWidth={2} />
         </div>
-        <span className="font-semibold text-sm text-gray-900 tracking-tight">Gestión de Tareas</span>
+        <span className="font-semibold text-sm text-gray-900 tracking-tight truncate">Gestión de Tareas</span>
+        {user && (
+          <div className="ml-auto flex-shrink-0">
+            <NotificationsBell initialUnreadCount={unreadCount} />
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 px-2.5 py-2 overflow-y-auto scrollbar-thin">
