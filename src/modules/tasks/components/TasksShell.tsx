@@ -65,9 +65,19 @@ interface TasksShellProps {
   users: UserOption[];
   initialSearch: string;
   initialAssignedTo: string;
+  currentUserId: string;
+  isFullAccess: boolean;
 }
 
-export function TasksShell({ board, stats, users, initialSearch, initialAssignedTo }: TasksShellProps) {
+export function TasksShell({
+  board,
+  stats,
+  users,
+  initialSearch,
+  initialAssignedTo,
+  currentUserId,
+  isFullAccess,
+}: TasksShellProps) {
   const router = useRouter();
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -283,13 +293,23 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
       {/* Filtros */}
       <div className="px-6 pt-3 flex flex-wrap items-center gap-2">
         <Select value={assignedFilter} onChange={(e) => handleAssignedChange(e.target.value)} className="w-auto">
-          <option value="">Todos los asignados</option>
-          <option value={UNASSIGNED_SENTINEL}>Sin asignar</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
+          {isFullAccess ? (
+            <>
+              <option value="">Todos los asignados</option>
+              <option value={UNASSIGNED_SENTINEL}>Sin asignar</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </>
+          ) : (
+            <>
+              <option value="">Todas (mías y sin asignar)</option>
+              <option value={currentUserId}>Asignadas a mí</option>
+              <option value={UNASSIGNED_SENTINEL}>Sin asignar</option>
+            </>
+          )}
         </Select>
 
         {hasFilters && (
@@ -373,11 +393,15 @@ export function TasksShell({ board, stats, users, initialSearch, initialAssigned
             <Field label="Asignado a">
               <Select value={form.assignedTo} onChange={(e) => setForm((f) => ({ ...f, assignedTo: e.target.value }))}>
                 <option value="">Sin asignar</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
+                {isFullAccess ? (
+                  users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value={currentUserId}>Yo mismo</option>
+                )}
               </Select>
             </Field>
           </div>

@@ -228,7 +228,7 @@ export function UsersShell({ users }: UsersShellProps) {
 
           <Field label="Rol">
             <Select value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as UserRole }))}>
-              <option value="agent">Miembro</option>
+              <option value="agent">Usuario</option>
               <option value="supervisor">Supervisor</option>
               <option value="admin">Administrador</option>
             </Select>
@@ -293,7 +293,7 @@ function RoleBadge({ role }: { role: UserRole }) {
       </Badge>
     )
   }
-  return <Badge tone="info">Miembro</Badge>
+  return <Badge tone="info">Usuario</Badge>
 }
 
 function StatusBadge({ active }: { active: boolean }) {

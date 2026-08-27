@@ -22,7 +22,7 @@ interface FeedbackMsg {
 const ROLE_LABEL: Record<UserRole, string> = {
   admin: "Administrador",
   supervisor: "Supervisor",
-  agent: "Miembro",
+  agent: "Usuario",
 }
 
 export function ProfileShell({ profile }: ProfileShellProps) {

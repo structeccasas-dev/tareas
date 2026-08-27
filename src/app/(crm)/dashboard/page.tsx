@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation"
 import { ListTodo, Loader, CheckCircle2, XCircle, AlertTriangle, PlusCircle, CheckCheck } from "lucide-react"
 import { PageHeader } from "@/components/PageHeader"
 import { Card } from "@/components/Card"
@@ -20,6 +21,8 @@ import {
 } from "@/modules/dashboard/data/queries"
 import { getDueTasks } from "@/modules/tasks/data/queries"
 import { STATUS_LABELS, STATUS_TONE } from "@/modules/tasks/lib/status"
+import { getSession } from "@/lib/session"
+import { hasFullAccess } from "@/lib/permissions"
 
 const TONE_STROKE: Record<string, string> = {
   neutral: "stroke-gray-400",
@@ -33,16 +36,21 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ range?: string; from?: string; to?: string }>
 }) {
+  const session = await getSession()
+  if (!session) redirect("/login")
+
+  const isFullAccess = hasFullAccess(session)
+
   const params = await searchParams
   const range = parseRange(params)
 
   const [metrics, tasksByDay, tasksByStatus, tasksByMember, members, activity, dueTasks] = await Promise.all([
-    getDashboardMetrics(range),
-    getTasksByDay(range),
-    getTasksByStatusDistribution(),
-    getTasksByMember(),
-    getMembersOverview(),
-    getRecentActivity(15),
+    getDashboardMetrics(range, session),
+    getTasksByDay(range, session),
+    getTasksByStatusDistribution(session),
+    isFullAccess ? getTasksByMember() : Promise.resolve([]),
+    isFullAccess ? getMembersOverview() : Promise.resolve([]),
+    getRecentActivity(15, session),
     getDueTasks(8),
   ])
 
@@ -59,7 +67,10 @@ export default async function DashboardPage({
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader title="Dashboard" description="Resumen general de tareas." />
+      <PageHeader
+        title="Dashboard"
+        description={isFullAccess ? "Resumen general de tareas." : "Resumen de tus tareas."}
+      />
 
       <div className="p-6 space-y-6">
         <DueTasksCard tasks={dueTasks} />
@@ -89,15 +100,17 @@ export default async function DashboardPage({
             />
           </Card>
 
-          <Card className="p-5">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">Tareas por miembro</h2>
-            <HorizontalBarList data={tasksByMember.map((a) => ({ label: a.userName, value: a.count }))} />
-          </Card>
+          {isFullAccess && (
+            <Card className="p-5">
+              <h2 className="text-sm font-semibold text-gray-900 mb-4">Tareas por miembro</h2>
+              <HorizontalBarList data={tasksByMember.map((a) => ({ label: a.userName, value: a.count }))} />
+            </Card>
+          )}
 
           <ActivityFeed items={activity} />
         </div>
 
-        <MembersTable members={members} />
+        {isFullAccess && <MembersTable members={members} />}
       </div>
     </div>
   )

@@ -7,8 +7,9 @@ import { tasks } from "@/db/schema/task"
 import { users } from "@/db/schema/user"
 import { taskComments } from "@/db/schema/taskComment"
 import { getSession } from "@/lib/session"
+import type { SessionPayload } from "@/lib/session"
 import { logActivity } from "@/lib/activityLog"
-import { canManageRecord } from "@/lib/permissions"
+import { canManageRecord, hasFullAccess } from "@/lib/permissions"
 import { notifyUser } from "@/lib/notify"
 import { STATUS_LABELS, PRIORITY_LABELS } from "@/modules/tasks/lib/status"
 import type { TaskStatus, TaskPriority, TaskColumn, TasksFilters, TaskWithRelations, TimelineEntry } from "@/types/tasks"
@@ -93,6 +94,15 @@ async function maybeNotifyAssignment(taskId: string, title: string, assignedTo: 
   })
 }
 
+// Un usuario sin acceso total solo puede dejar la tarea sin asignar o
+// asignársela a sí mismo — asignarle trabajo a otro es cosa de admin/supervisor.
+function assertCanAssign(session: { role: SessionPayload["role"]; userId: string }, assignedTo: string | null) {
+  if (hasFullAccess(session)) return
+  if (assignedTo && assignedTo !== session.userId) {
+    throw new Error("No podés asignar tareas a otros usuarios")
+  }
+}
+
 interface TaskFormData {
   title: string
   description: string | null
@@ -107,6 +117,7 @@ interface TaskFormData {
 export async function createTask(data: TaskFormData) {
   const session = await getSession()
   if (!session) throw new Error("No autenticado")
+  assertCanAssign(session, data.assignedTo || null)
 
   const [created] = await db
     .insert(tasks)
@@ -159,6 +170,7 @@ export async function updateTask(id: string, data: TaskFormData) {
   if (current && !canManageRecord(session, current.assignedTo)) {
     throw new Error("No autorizado")
   }
+  assertCanAssign(session, data.assignedTo || null)
 
   const assignmentChanged = (current?.assignedTo ?? null) !== (data.assignedTo || null)
   const dueAtChanged = (current?.dueAt?.getTime() ?? null) !== (data.dueAt?.getTime() ?? null)

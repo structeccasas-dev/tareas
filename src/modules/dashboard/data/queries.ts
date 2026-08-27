@@ -11,6 +11,10 @@ import type {
   DashboardRange,
   TaskStatusPoint,
 } from "@/types/dashboard"
+import type { SessionPayload } from "@/lib/session"
+import { ownershipCondition } from "@/lib/permissions"
+
+type Scope = Pick<SessionPayload, "role" | "userId">
 
 const TASK_STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"]
 const ACTIVE_TASK_STATUSES: TaskStatus[] = ["todo", "in_progress"]
@@ -41,23 +45,30 @@ function fillDayBuckets(range: DashboardRange, rows: { day: string; value: numbe
 
 // ── Tarjetas ──────────────────────────────────────────────────────────────────
 
-export async function getDashboardMetrics(range: DashboardRange): Promise<DashboardMetrics> {
+export async function getDashboardMetrics(range: DashboardRange, scope: Scope): Promise<DashboardMetrics> {
   try {
+    const owned = ownershipCondition(scope, tasks.assignedTo)
+
     const [statusRows, [createdRow], [completedRow], [overdueRow]] = await Promise.all([
-      db.select({ status: tasks.status, value: count() }).from(tasks).groupBy(tasks.status),
+      db.select({ status: tasks.status, value: count() }).from(tasks).where(owned).groupBy(tasks.status),
       db
         .select({ value: count() })
         .from(tasks)
-        .where(and(gte(tasks.createdAt, range.from), lte(tasks.createdAt, range.to))),
+        .where(and(gte(tasks.createdAt, range.from), lte(tasks.createdAt, range.to), owned)),
       db
         .select({ value: count() })
         .from(tasks)
-        .where(and(eq(tasks.status, "done"), gte(tasks.updatedAt, range.from), lte(tasks.updatedAt, range.to))),
+        .where(and(eq(tasks.status, "done"), gte(tasks.updatedAt, range.from), lte(tasks.updatedAt, range.to), owned)),
       db
         .select({ value: count() })
         .from(tasks)
         .where(
-          and(sql`${tasks.dueAt} is not null`, lte(tasks.dueAt, new Date()), sql`${tasks.status} not in ('done', 'cancelled')`),
+          and(
+            sql`${tasks.dueAt} is not null`,
+            lte(tasks.dueAt, new Date()),
+            sql`${tasks.status} not in ('done', 'cancelled')`,
+            owned,
+          ),
         ),
     ])
 
@@ -89,13 +100,13 @@ export async function getDashboardMetrics(range: DashboardRange): Promise<Dashbo
 
 // ── Gráficos ──────────────────────────────────────────────────────────────────
 
-export async function getTasksByDay(range: DashboardRange): Promise<DailyPoint[]> {
+export async function getTasksByDay(range: DashboardRange, scope: Scope): Promise<DailyPoint[]> {
   try {
     const dayExpr = sql<string>`to_char(date_trunc('day', ${tasks.createdAt}), 'YYYY-MM-DD')`
     const rows = await db
       .select({ day: dayExpr, value: count() })
       .from(tasks)
-      .where(and(gte(tasks.createdAt, range.from), lte(tasks.createdAt, range.to)))
+      .where(and(gte(tasks.createdAt, range.from), lte(tasks.createdAt, range.to), ownershipCondition(scope, tasks.assignedTo)))
       .groupBy(dayExpr)
     return fillDayBuckets(range, rows)
   } catch {
@@ -103,9 +114,13 @@ export async function getTasksByDay(range: DashboardRange): Promise<DailyPoint[]
   }
 }
 
-export async function getTasksByStatusDistribution(): Promise<TaskStatusPoint[]> {
+export async function getTasksByStatusDistribution(scope: Scope): Promise<TaskStatusPoint[]> {
   try {
-    const rows = await db.select({ status: tasks.status, value: count() }).from(tasks).groupBy(tasks.status)
+    const rows = await db
+      .select({ status: tasks.status, value: count() })
+      .from(tasks)
+      .where(ownershipCondition(scope, tasks.assignedTo))
+      .groupBy(tasks.status)
     const byStatus = new Map(rows.map((r) => [r.status, Number(r.value)]))
     return TASK_STATUSES.map((status) => ({ status, count: byStatus.get(status) ?? 0 }))
   } catch {
@@ -113,6 +128,8 @@ export async function getTasksByStatusDistribution(): Promise<TaskStatusPoint[]>
   }
 }
 
+// Comparativa entre miembros — solo tiene sentido para quien puede ver las
+// tareas de todos (admin/supervisor); no se llama para usuarios restringidos.
 export async function getTasksByMember(): Promise<{ userId: string; userName: string; count: number }[]> {
   try {
     const valueExpr = count()
@@ -131,6 +148,7 @@ export async function getTasksByMember(): Promise<{ userId: string; userName: st
 
 // ── Miembros ──────────────────────────────────────────────────────────────────
 
+// Igual que getTasksByMember: vista de equipo, solo para admin/supervisor.
 export async function getMembersOverview(): Promise<MemberOverview[]> {
   try {
     const [memberRows, activeRows, doneRows] = await Promise.all([
@@ -165,18 +183,22 @@ export async function getMembersOverview(): Promise<MemberOverview[]> {
 
 // ── Actividad reciente ────────────────────────────────────────────────────────
 
-export async function getRecentActivity(limit = 15): Promise<ActivityItem[]> {
+export async function getRecentActivity(limit: number, scope: Scope): Promise<ActivityItem[]> {
   try {
+    const owned = ownershipCondition(scope, tasks.assignedTo)
+
     const [createdRows, assignedRows] = await Promise.all([
       db
         .select({ id: tasks.id, title: tasks.title, createdAt: tasks.createdAt })
         .from(tasks)
+        .where(owned)
         .orderBy(desc(tasks.createdAt))
         .limit(limit),
       db
         .select({ id: tasks.id, title: tasks.title, updatedAt: tasks.updatedAt, userName: users.name })
         .from(tasks)
         .innerJoin(users, eq(tasks.assignedTo, users.id))
+        .where(owned)
         .orderBy(desc(tasks.updatedAt))
         .limit(limit),
     ])
