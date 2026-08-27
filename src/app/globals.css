@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f3f5f7;
+  --foreground: #111827;
+
+  --color-bg: #f3f5f7;
+  --color-surface: #fafafb;
+  --color-surface-alt: #eef0f2;
+  --color-sidebar: #eef2f4;
+
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.1);
+
+  --color-primary: #25d366;
+  --color-primary-hover: #21bd5c;
+  --color-primary-dark: #128c7e;
+
+  --color-success: #16a34a;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-info: #3b82f6;
+
+  --color-bubble-sent: #d9fdd3;
+  --color-bubble-received: #ffffff;
+
+  /* Sombras difusas en varias capas — nunca una sola sombra dura */
+  --shadow-elevation-xs: 0 1px 1px rgba(17, 24, 39, 0.03), 0 1px 2px rgba(17, 24, 39, 0.04);
+  --shadow-elevation-sm: 0 1px 2px rgba(17, 24, 39, 0.03), 0 4px 10px rgba(17, 24, 39, 0.05);
+  --shadow-elevation-md: 0 2px 4px rgba(17, 24, 39, 0.03), 0 10px 24px rgba(17, 24, 39, 0.07);
+  --shadow-elevation-lg: 0 4px 8px rgba(17, 24, 39, 0.04), 0 20px 44px rgba(17, 24, 39, 0.1);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-alt: var(--color-surface-alt);
+  --color-sidebar: var(--color-sidebar);
+
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-dark: var(--color-primary-dark);
+
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-error: var(--color-error);
+  --color-info: var(--color-info);
+
+  --color-bubble-sent: var(--color-bubble-sent);
+  --color-bubble-received: var(--color-bubble-received);
+
+  --shadow-elevation-xs: var(--shadow-elevation-xs);
+  --shadow-elevation-sm: var(--shadow-elevation-sm);
+  --shadow-elevation-md: var(--shadow-elevation-md);
+  --shadow-elevation-lg: var(--shadow-elevation-lg);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Thin, unobtrusive scrollbars for chat/list panels */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(17, 24, 39, 0.14) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(17, 24, 39, 0.14);
+  border-radius: 9999px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(17, 24, 39, 0.22);
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
