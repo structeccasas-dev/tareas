@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutGrid, ListChecks, CalendarDays, UserCog, LogOut, CheckSquare } from "lucide-react"
+import { LayoutGrid, ListChecks, CalendarDays, UserCog, Users2, FolderKanban, LogOut, CheckSquare } from "lucide-react"
 import { logout } from "@/lib/auth"
 import { Avatar } from "@/components/Avatar"
 import { NotificationsBell } from "@/modules/notifications/components/NotificationsBell"
@@ -12,7 +12,9 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutGrid, roles: null },
   { href: "/tareas", label: "Tareas", icon: ListChecks, roles: null },
   { href: "/calendario", label: "Calendario", icon: CalendarDays, roles: null },
+  { href: "/proyectos", label: "Proyectos", icon: FolderKanban, roles: ["admin"] },
   { href: "/users", label: "Usuarios", icon: UserCog, roles: ["admin"] },
+  { href: "/equipos", label: "Equipos", icon: Users2, roles: ["admin"] },
 ] as const satisfies { href: string; label: string; icon: unknown; roles: UserRole[] | null }[]
 
 interface SidebarProps {

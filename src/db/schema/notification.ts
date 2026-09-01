@@ -11,7 +11,7 @@ export const notifications = pgTable("notifications", {
     .notNull(),
 
   type: varchar({ length: 30 })
-    .$type<"task_assigned" | "task_due_soon" | "task_overdue">()
+    .$type<"task_assigned" | "task_reminder" | "task_overdue" | "task_comment" | "task_notify_creator">()
     .notNull(),
 
   title: varchar({ length: 255 }).notNull(),

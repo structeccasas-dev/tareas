@@ -73,9 +73,11 @@ interface KanbanBoardProps {
   onEdit: (task: TaskWithRelations) => void
   onDelete: (task: TaskWithRelations) => void
   onStatusChange: (taskId: string, fromStatus: TaskStatus, newStatus: TaskStatus) => void
+  onRequestCancel: (taskId: string, fromStatus: TaskStatus) => void
   onPageChange: (status: TaskStatus, page: number) => void
   loadingPage: Set<TaskStatus>
   isPending: boolean
+  canDelete: boolean
 }
 
 export function KanbanBoard({
@@ -85,9 +87,11 @@ export function KanbanBoard({
   onEdit,
   onDelete,
   onStatusChange,
+  onRequestCancel,
   onPageChange,
   loadingPage,
   isPending,
+  canDelete,
 }: KanbanBoardProps) {
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -143,7 +147,11 @@ export function KanbanBoard({
     setDragOverStatus(null)
     setDraggingId(null)
     if (taskId && fromStatus !== toStatus) {
-      onStatusChange(taskId, fromStatus, toStatus)
+      if (toStatus === "cancelled") {
+        onRequestCancel(taskId, fromStatus)
+      } else {
+        onStatusChange(taskId, fromStatus, toStatus)
+      }
     }
   }
 
@@ -205,6 +213,7 @@ export function KanbanBoard({
                     onEdit={onEdit}
                     onDelete={onDelete}
                     disabled={isPending}
+                    canDelete={canDelete}
                   />
                 ))}
 
@@ -273,6 +282,7 @@ export function KanbanBoard({
                     onEdit={onEdit}
                     onDelete={onDelete}
                     disabled={isPending}
+                    canDelete={canDelete}
                     draggable={false}
                   />
                 ))}
@@ -380,10 +390,11 @@ interface KanbanCardProps {
   onEdit: (task: TaskWithRelations) => void
   onDelete: (task: TaskWithRelations) => void
   disabled: boolean
+  canDelete: boolean
   draggable?: boolean
 }
 
-function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete, disabled, draggable = true }: KanbanCardProps) {
+function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete, disabled, canDelete, draggable = true }: KanbanCardProps) {
   const isDone = isClosedStatus(task.status)
 
   return (
@@ -416,6 +427,8 @@ function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete
               <Avatar name={task.assignedUser.name} size="sm" />
               <span className="text-xs text-gray-500 truncate">{task.assignedUser.name}</span>
             </span>
+          ) : task.assignedTeam ? (
+            <span className="text-xs text-gray-500 truncate">Equipo {task.assignedTeam.name}</span>
           ) : (
             <span className="text-xs text-gray-300 italic">Sin asignar</span>
           )}
@@ -450,6 +463,7 @@ function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete
         >
           Editar
         </Button>
+        {canDelete && (
         <button
           draggable={false}
           onClick={(e) => {
@@ -461,6 +475,7 @@ function KanbanCard({ task, isDragging, onDragStart, onDragEnd, onEdit, onDelete
         >
           Eliminar
         </button>
+        )}
       </div>
     </div>
   )

@@ -4,8 +4,10 @@ import type { NextRequest } from "next/server"
 import { eq } from "drizzle-orm"
 import { db } from "@/db"
 import { tasks } from "@/db/schema/task"
-import { notifyUser } from "@/lib/notify"
-import { getDueSoonCandidates, getOverdueCandidates } from "@/modules/tasks/data/queries"
+import { taskReminders } from "@/db/schema/taskReminder"
+import { notifyUsers } from "@/lib/notify"
+import { getPendingReminders, getOverdueCandidates, resolveTaskRecipients } from "@/modules/tasks/data/queries"
+import { generateUpcomingWeeklyBatches } from "@/modules/tasks/lib/recurrenceJobs"
 
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
@@ -25,35 +27,42 @@ export async function GET(request: NextRequest) {
     return new Response("Unauthorized", { status: 401 })
   }
 
-  const [dueSoon, overdue] = await Promise.all([getDueSoonCandidates(), getOverdueCandidates()])
+  const [reminders, overdue] = await Promise.all([getPendingReminders(), getOverdueCandidates()])
 
   let sent = 0
 
-  for (const task of dueSoon) {
-    await notifyUser({
-      userId: task.assignedTo,
-      type: "task_due_soon",
-      title: `Tarea próxima a vencer: ${task.title}`,
-      body: `Vence a las ${task.dueAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`,
-      taskId: task.id,
-    })
-    await db.update(tasks).set({ dueSoonNotifiedAt: new Date() }).where(eq(tasks.id, task.id))
-    sent++
+  for (const reminder of reminders) {
+    const recipients = await resolveTaskRecipients(reminder.assignedTo, reminder.assignedTeamId)
+    if (recipients.length > 0) {
+      await notifyUsers(recipients, {
+        type: "task_reminder",
+        title: `Recordatorio: ${reminder.title}`,
+        body: `Vence a las ${reminder.dueAt.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`,
+        taskId: reminder.taskId,
+      })
+      sent += recipients.length
+    }
+    await db.update(taskReminders).set({ notifiedAt: new Date() }).where(eq(taskReminders.id, reminder.reminderId))
   }
 
   for (const task of overdue) {
-    await notifyUser({
-      userId: task.assignedTo,
-      type: "task_overdue",
-      title: `Tarea vencida: ${task.title}`,
-      body: "Esta tarea pasó su fecha límite.",
-      taskId: task.id,
-    })
+    const recipients = await resolveTaskRecipients(task.assignedTo, task.assignedTeamId)
+    if (recipients.length > 0) {
+      await notifyUsers(recipients, {
+        type: "task_overdue",
+        title: `Tarea vencida: ${task.title}`,
+        body: "Esta tarea pasó su fecha límite.",
+        taskId: task.id,
+      })
+      sent += recipients.length
+    }
     await db.update(tasks).set({ overdueNotifiedAt: new Date() }).where(eq(tasks.id, task.id))
-    sent++
   }
 
-  return new Response(`OK — ${sent} notificaciones enviadas (${dueSoon.length} por vencer, ${overdue.length} vencidas)`, {
-    status: 200,
-  })
+  const weeklyBatchesCreated = await generateUpcomingWeeklyBatches()
+
+  return new Response(
+    `OK — ${sent} notificaciones enviadas (${reminders.length} recordatorios, ${overdue.length} vencidas), ${weeklyBatchesCreated} ocurrencias semanales generadas`,
+    { status: 200 },
+  )
 }

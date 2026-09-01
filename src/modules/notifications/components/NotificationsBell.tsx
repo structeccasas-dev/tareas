@@ -3,15 +3,17 @@
 import { useState, useSyncExternalStore, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
-import { Bell, CheckCheck, UserPlus, Clock, AlertTriangle } from "lucide-react"
+import { Bell, CheckCheck, UserPlus, Clock, AlertTriangle, MessageSquare, BellRing } from "lucide-react"
 import type { NotificationItem, NotificationType } from "@/types/notifications"
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead } from "@/modules/notifications/actions/notificationActions"
 import { formatRelativeTime } from "@/lib/format"
 
 const ICONS: Record<NotificationType, typeof Bell> = {
   task_assigned: UserPlus,
-  task_due_soon: Clock,
+  task_reminder: Clock,
   task_overdue: AlertTriangle,
+  task_comment: MessageSquare,
+  task_notify_creator: BellRing,
 }
 
 const noopSubscribe = () => () => {}

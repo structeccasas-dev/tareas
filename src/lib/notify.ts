@@ -19,3 +19,14 @@ export async function notifyUser({ userId, type, title, body, taskId, url }: Not
   await db.insert(notifications).values({ userId, type, title, body, taskId: taskId ?? null })
   await sendPushToUser(userId, { title, body, url: url ?? "/tareas", tag: taskId })
 }
+
+// Igual que notifyUser, pero a varios destinatarios a la vez (ej. todos los
+// miembros de un equipo), salteando opcionalmente al que disparó la acción.
+export async function notifyUsers(
+  userIds: string[],
+  params: Omit<NotifyUserParams, "userId">,
+  excludeUserId?: string,
+): Promise<void> {
+  const recipients = userIds.filter((id) => id !== excludeUserId)
+  await Promise.all(recipients.map((userId) => notifyUser({ ...params, userId })))
+}

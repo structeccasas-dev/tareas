@@ -28,9 +28,10 @@ interface CalendarShellProps {
   initialView: CalendarViewMode
   initialAnchor: string
   initialTasks: TaskWithRelations[]
+  currentUserId: string
 }
 
-export function CalendarShell({ initialView, initialAnchor, initialTasks }: CalendarShellProps) {
+export function CalendarShell({ initialView, initialAnchor, initialTasks, currentUserId }: CalendarShellProps) {
   const [view, setView] = useState<CalendarViewMode>(initialView)
   const [anchor, setAnchor] = useState(() => new Date(initialAnchor))
   const [tasks, setTasks] = useState<TaskWithRelations[]>(initialTasks)
@@ -127,7 +128,7 @@ export function CalendarShell({ initialView, initialAnchor, initialTasks }: Cale
         {view === "day" && <DayView anchor={anchor} tasksByDay={tasksByDay} onSelectTask={setSelectedTask} />}
       </div>
 
-      <TaskDetailDialog task={selectedTask} onClose={() => setSelectedTask(null)} />
+      <TaskDetailDialog task={selectedTask} onClose={() => setSelectedTask(null)} currentUserId={currentUserId} />
     </div>
   )
 }

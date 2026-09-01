@@ -1,4 +1,4 @@
-export type NotificationType = "task_assigned" | "task_due_soon" | "task_overdue"
+export type NotificationType = "task_assigned" | "task_reminder" | "task_overdue" | "task_comment" | "task_notify_creator"
 
 export interface NotificationItem {
   id: string
