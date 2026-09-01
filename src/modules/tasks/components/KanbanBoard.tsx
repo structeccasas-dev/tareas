@@ -182,7 +182,7 @@ export function KanbanBoard({
                   <span className={`text-sm font-semibold truncate ${col.headerColor}`}>{STATUS_LABELS[col.status]}</span>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full bg-white/80 ${col.headerColor}`}>
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full bg-surface/80 ${col.headerColor}`}>
                     {realCount}
                   </span>
                   {totalTasks > 0 && <span className="text-[10px] text-gray-400">{pct}%</span>}
@@ -255,7 +255,7 @@ export function KanbanBoard({
               <span className={`text-base font-semibold truncate ${maximizedCol.headerColor}`}>
                 {STATUS_LABELS[maximizedStatus]}
               </span>
-              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full bg-white/80 flex-shrink-0 ${maximizedCol.headerColor}`}>
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full bg-surface/80 flex-shrink-0 ${maximizedCol.headerColor}`}>
                 {countsByStatus[maximizedStatus] ?? 0}
               </span>
             </div>

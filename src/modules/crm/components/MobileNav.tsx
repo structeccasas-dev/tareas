@@ -68,7 +68,7 @@ export function MobileNav({ role, user, dueTasksCount = 0, unreadCount = 0 }: Mo
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15, ease: "easeOut" }}
-              className="absolute inset-0 bg-gray-900/20 backdrop-blur-sm"
+              className="absolute inset-0 bg-neutral-900/20 backdrop-blur-sm"
               onClick={() => setOpen(false)}
               aria-hidden="true"
             />

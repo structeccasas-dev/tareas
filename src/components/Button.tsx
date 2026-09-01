@@ -12,7 +12,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_CLS: Record<ButtonVariant, string> = {
   primary:
-    "bg-primary text-white shadow-elevation-xs hover:bg-primary-hover hover:shadow-elevation-sm active:bg-primary-dark active:shadow-elevation-xs",
+    "bg-primary text-white shadow-elevation-xs hover:bg-primary-hover hover:shadow-elevation-sm active:bg-primary-hover active:shadow-elevation-xs",
   secondary:
     "bg-surface text-gray-700 border border-border shadow-elevation-xs hover:bg-surface-alt hover:border-border-strong active:bg-surface-alt/80",
   danger:

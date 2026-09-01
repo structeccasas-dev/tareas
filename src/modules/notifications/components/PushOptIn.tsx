@@ -84,7 +84,7 @@ export default function PushOptIn() {
 
   if (showIOSHint) {
     return (
-      <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-80 z-40 flex items-start gap-2.5 p-3.5 rounded-xl bg-gray-900 text-white text-sm shadow-elevation-md print:hidden">
+      <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-80 z-40 flex items-start gap-2.5 p-3.5 rounded-xl bg-neutral-900 text-white text-sm shadow-elevation-md print:hidden">
         <Share className="w-4 h-4 flex-shrink-0 mt-0.5" strokeWidth={1.9} />
         <p className="flex-1">
           Para recibir notificaciones de seguimiento en este iPhone, tocá el botón de compartir{" "}
@@ -105,7 +105,7 @@ export default function PushOptIn() {
       type="button"
       onClick={handleEnable}
       disabled={loading}
-      className="fixed bottom-4 right-4 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium shadow-elevation-md hover:bg-primary-dark transition-colors duration-150 disabled:opacity-60 print:hidden"
+      className="fixed bottom-4 right-4 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-medium shadow-elevation-md hover:bg-primary-hover transition-colors duration-150 disabled:opacity-60 print:hidden"
     >
       <Bell className="w-4 h-4 flex-shrink-0" strokeWidth={1.9} />
       {loading ? "Activando..." : "Activar notificaciones de tareas"}

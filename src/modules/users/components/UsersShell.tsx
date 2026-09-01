@@ -242,7 +242,7 @@ export function UsersShell({ users }: UsersShellProps) {
                 aria-checked={form.active}
                 onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/30 ${
-                  form.active ? "bg-primary" : "bg-gray-200"
+                  form.active ? "bg-primary hover:bg-primary-hover" : "bg-gray-200 hover:bg-gray-300"
                 }`}
               >
                 <span

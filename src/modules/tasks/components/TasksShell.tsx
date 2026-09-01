@@ -724,7 +724,7 @@ export function TasksShell({
                           onClick={() => toggleWeekday(d.value)}
                           className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors duration-150 ${
                             form.recurrenceWeekdays.includes(d.value)
-                              ? "bg-primary/10 border-primary/40 text-primary-dark"
+                              ? "bg-primary/10 border-primary/40 text-primary-dark hover:bg-primary/15"
                               : "border-border text-gray-500 hover:bg-surface-alt"
                           }`}
                         >
@@ -785,7 +785,7 @@ export function TasksShell({
                   onClick={() => toggleReminder(r.value)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors duration-150 ${
                     form.reminders.includes(r.value)
-                      ? "bg-primary/10 border-primary/40 text-primary-dark"
+                      ? "bg-primary/10 border-primary/40 text-primary-dark hover:bg-primary/15"
                       : "border-border text-gray-500 hover:bg-surface-alt"
                   }`}
                 >
