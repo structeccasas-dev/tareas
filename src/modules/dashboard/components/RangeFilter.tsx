@@ -53,7 +53,7 @@ export function RangeFilter({ current, from, to }: RangeFilterProps) {
           onClick={() => handleSelect(opt.key)}
           className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-colors duration-200 ${
             current === opt.key
-              ? "bg-primary/10 text-primary-dark border-primary/20"
+              ? "bg-primary/10 text-primary-dark border-primary/20 hover:bg-primary/15"
               : "bg-surface text-gray-500 border-border hover:border-border-strong"
           }`}
         >
