@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useRef, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { Plus, Search, Users as UsersIcon, X } from "lucide-react"
-import type { Team } from "@/types/teams"
+import type { Team, TeamsPage } from "@/types/teams"
 import type { User } from "@/types/users"
 import { createTeam, renameTeam, deleteTeam, addTeamMember, removeTeamMember } from "@/modules/teams/actions/teamActions"
 import { Dialog } from "@/components/Dialog"
@@ -13,14 +14,20 @@ import { Select } from "@/components/Select"
 import { Badge } from "@/components/Badge"
 import { Avatar } from "@/components/Avatar"
 import { PageHeader } from "@/components/PageHeader"
+import { Pagination } from "@/components/Pagination"
 
 interface TeamsShellProps {
-  teams: Team[]
+  data: TeamsPage
   users: User[]
+  initialSearch: string
 }
 
-export function TeamsShell({ teams, users }: TeamsShellProps) {
-  const [search, setSearch] = useState("")
+export function TeamsShell({ data, users, initialSearch }: TeamsShellProps) {
+  const { teams, page, totalPages } = data
+  const router = useRouter()
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  const [search, setSearch] = useState(initialSearch)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTeam, setEditingTeam] = useState<Team | null>(null)
   const [name, setName] = useState("")
@@ -28,11 +35,21 @@ export function TeamsShell({ teams, users }: TeamsShellProps) {
   const [deleteTarget, setDeleteTarget] = useState<Team | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return teams
-    return teams.filter((t) => t.name.toLowerCase().includes(q))
-  }, [teams, search])
+  const [prevInitialSearch, setPrevInitialSearch] = useState(initialSearch)
+  if (initialSearch !== prevInitialSearch) {
+    setPrevInitialSearch(initialSearch)
+    setSearch(initialSearch)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    clearTimeout(searchTimeoutRef.current)
+    searchTimeoutRef.current = setTimeout(() => {
+      const params = new URLSearchParams()
+      if (value) params.set("search", value)
+      router.replace(`/equipos${params.toString() ? `?${params}` : ""}`)
+    }, 350)
+  }
 
   function openCreate() {
     setEditingTeam(null)
@@ -96,7 +113,7 @@ export function TeamsShell({ teams, users }: TeamsShellProps) {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Equipos"
-        description={`${teams.length} ${teams.length === 1 ? "equipo" : "equipos"} en el sistema`}
+        description={`${data.total} ${data.total === 1 ? "equipo" : "equipos"} en el sistema`}
         actions={
           <Button onClick={openCreate}>
             <Plus className="w-4 h-4" />
@@ -113,11 +130,11 @@ export function TeamsShell({ teams, users }: TeamsShellProps) {
               icon={<Search />}
               placeholder="Buscar por nombre..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
             />
           </div>
 
-          {filtered.length === 0 ? (
+          {teams.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               {search ? (
                 <>
@@ -142,7 +159,7 @@ export function TeamsShell({ teams, users }: TeamsShellProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((team) => (
+                  {teams.map((team) => (
                     <tr key={team.id} className="hover:bg-surface-alt transition-colors duration-200 group">
                       <td className="px-4 py-3.5">
                         <p className="font-medium text-gray-900 truncate">{team.name}</p>
@@ -183,6 +200,8 @@ export function TeamsShell({ teams, users }: TeamsShellProps) {
               </table>
             </div>
           )}
+
+          <Pagination page={page} totalPages={totalPages} basePath="/equipos" searchParams={{ search }} />
         </Card>
       </div>
 

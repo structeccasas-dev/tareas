@@ -41,7 +41,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# migraciones SQL — se generan localmente (npm run db:generate) y se corren a mano
-# contra la base de datos, no viajan en el repo. drizzle/meta/ sí queda versionado
-# (drizzle-kit lo necesita para calcular el diff de la próxima migración).
-/drizzle/*.sql
+# migraciones y snapshots de drizzle-kit — se generan localmente
+# (npm run db:generate) y se corren a mano contra la base de datos, no viajan
+# en el repo.
+/drizzle/
+
+# archivos subidos por el módulo de Personal (fotos de carnet, contratos firmados)
+/storage/

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useRef, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { Plus, Search, Users as UsersIcon } from "lucide-react"
-import type { UserRole, User } from "@/types/users"
+import type { UserRole, User, UsersPage } from "@/types/users"
 import { createUser, updateUser, toggleUserActive } from "@/modules/users/actions/userActions"
 import { Dialog } from "@/components/Dialog"
 import { Button } from "@/components/Button"
@@ -12,9 +13,11 @@ import { Select } from "@/components/Select"
 import { Badge } from "@/components/Badge"
 import { Avatar } from "@/components/Avatar"
 import { PageHeader } from "@/components/PageHeader"
+import { Pagination } from "@/components/Pagination"
 
 interface UsersShellProps {
-  users: User[]
+  data: UsersPage
+  initialSearch: string
 }
 
 interface FormState {
@@ -33,18 +36,32 @@ const EMPTY_FORM: FormState = {
   password: "",
 }
 
-export function UsersShell({ users }: UsersShellProps) {
-  const [search, setSearch] = useState("")
+export function UsersShell({ data, initialSearch }: UsersShellProps) {
+  const { users, page, totalPages } = data
+  const router = useRouter()
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  const [search, setSearch] = useState(initialSearch)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [isPending, startTransition] = useTransition()
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return users
-    return users.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
-  }, [users, search])
+  const [prevInitialSearch, setPrevInitialSearch] = useState(initialSearch)
+  if (initialSearch !== prevInitialSearch) {
+    setPrevInitialSearch(initialSearch)
+    setSearch(initialSearch)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    clearTimeout(searchTimeoutRef.current)
+    searchTimeoutRef.current = setTimeout(() => {
+      const params = new URLSearchParams()
+      if (value) params.set("search", value)
+      router.replace(`/users${params.toString() ? `?${params}` : ""}`)
+    }, 350)
+  }
 
   function openCreate() {
     setEditingUser(null)
@@ -100,7 +117,7 @@ export function UsersShell({ users }: UsersShellProps) {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Usuarios"
-        description={`${users.length} ${users.length === 1 ? "usuario" : "usuarios"} en el sistema`}
+        description={`${data.total} ${data.total === 1 ? "usuario" : "usuarios"} en el sistema`}
         actions={
           <Button onClick={openCreate}>
             <Plus className="w-4 h-4" />
@@ -117,11 +134,11 @@ export function UsersShell({ users }: UsersShellProps) {
               icon={<Search />}
               placeholder="Buscar por nombre o email..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
             />
           </div>
 
-          {filtered.length === 0 ? (
+          {users.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               {search ? (
                 <>
@@ -149,7 +166,7 @@ export function UsersShell({ users }: UsersShellProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((user) => (
+                  {users.map((user) => (
                     <tr key={user.id} className="hover:bg-surface-alt transition-colors duration-200 group">
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-3">
@@ -190,6 +207,8 @@ export function UsersShell({ users }: UsersShellProps) {
               </table>
             </div>
           )}
+
+          <Pagination page={page} totalPages={totalPages} basePath="/users" searchParams={{ search }} />
         </Card>
       </div>
 

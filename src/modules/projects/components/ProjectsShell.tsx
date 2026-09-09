@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useTransition, useMemo } from "react"
+import { useRef, useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import { Plus, Search, FolderKanban } from "lucide-react"
-import type { Project } from "@/types/projects"
+import type { Project, ProjectsPage } from "@/types/projects"
 import { createProject, renameProject, deleteProject } from "@/modules/projects/actions/projectActions"
 import { Dialog } from "@/components/Dialog"
 import { Button } from "@/components/Button"
@@ -10,13 +11,19 @@ import { Card } from "@/components/Card"
 import { Input } from "@/components/Input"
 import { Badge } from "@/components/Badge"
 import { PageHeader } from "@/components/PageHeader"
+import { Pagination } from "@/components/Pagination"
 
 interface ProjectsShellProps {
-  projects: Project[]
+  data: ProjectsPage
+  initialSearch: string
 }
 
-export function ProjectsShell({ projects }: ProjectsShellProps) {
-  const [search, setSearch] = useState("")
+export function ProjectsShell({ data, initialSearch }: ProjectsShellProps) {
+  const { projects, page, totalPages } = data
+  const router = useRouter()
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+
+  const [search, setSearch] = useState(initialSearch)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [name, setName] = useState("")
@@ -25,11 +32,21 @@ export function ProjectsShell({ projects }: ProjectsShellProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter((p) => p.name.toLowerCase().includes(q))
-  }, [projects, search])
+  const [prevInitialSearch, setPrevInitialSearch] = useState(initialSearch)
+  if (initialSearch !== prevInitialSearch) {
+    setPrevInitialSearch(initialSearch)
+    setSearch(initialSearch)
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value)
+    clearTimeout(searchTimeoutRef.current)
+    searchTimeoutRef.current = setTimeout(() => {
+      const params = new URLSearchParams()
+      if (value) params.set("search", value)
+      router.replace(`/proyectos${params.toString() ? `?${params}` : ""}`)
+    }, 350)
+  }
 
   function openCreate() {
     setEditingProject(null)
@@ -79,7 +96,7 @@ export function ProjectsShell({ projects }: ProjectsShellProps) {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Proyectos"
-        description={`${projects.length} ${projects.length === 1 ? "proyecto" : "proyectos"} en el sistema`}
+        description={`${data.total} ${data.total === 1 ? "proyecto" : "proyectos"} en el sistema`}
         actions={
           <Button onClick={openCreate}>
             <Plus className="w-4 h-4" />
@@ -96,11 +113,11 @@ export function ProjectsShell({ projects }: ProjectsShellProps) {
               icon={<Search />}
               placeholder="Buscar por nombre..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
             />
           </div>
 
-          {filtered.length === 0 ? (
+          {projects.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               {search ? (
                 <>
@@ -125,7 +142,7 @@ export function ProjectsShell({ projects }: ProjectsShellProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filtered.map((project) => (
+                  {projects.map((project) => (
                     <tr key={project.id} className="hover:bg-surface-alt transition-colors duration-200 group">
                       <td className="px-4 py-3.5">
                         <p className="font-medium text-gray-900 truncate">{project.name}</p>
@@ -160,6 +177,8 @@ export function ProjectsShell({ projects }: ProjectsShellProps) {
               </table>
             </div>
           )}
+
+          <Pagination page={page} totalPages={totalPages} basePath="/proyectos" searchParams={{ search }} />
         </Card>
       </div>
 
