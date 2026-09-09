@@ -1,10 +1,10 @@
 import { notFound } from "next/navigation"
-import { getUsersPage } from "@/modules/users/data/queries"
-import { UsersShell } from "@/modules/users/components/UsersShell"
+import { getPersonnelList } from "@/modules/personnel/data/queries"
+import { PersonnelShell } from "@/modules/personnel/components/PersonnelShell"
 import { getSession } from "@/lib/session"
 import { canManageUsers } from "@/lib/permissions"
 
-export default async function UsersPage({
+export default async function PersonalPage({
   searchParams,
 }: {
   searchParams: Promise<{ search?: string; page?: string }>
@@ -16,6 +16,6 @@ export default async function UsersPage({
   const search = typeof params.search === "string" ? params.search : ""
   const page = Math.max(1, Number(params.page) || 1)
 
-  const data = await getUsersPage({ page, search })
-  return <UsersShell data={data} initialSearch={search} />
+  const data = await getPersonnelList({ page, search })
+  return <PersonnelShell data={data} initialSearch={search} />
 }

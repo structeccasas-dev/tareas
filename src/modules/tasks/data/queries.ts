@@ -137,7 +137,11 @@ export async function getTasksPage(opts: PageOptions): Promise<TaskColumn> {
     )
 
     const [rows, [countRow]] = await Promise.all([
-      baseTaskSelect().where(whereClause).orderBy(desc(tasks.updatedAt)).limit(limit).offset(offset),
+      baseTaskSelect()
+        .where(whereClause)
+        .orderBy(sql`${tasks.dueAt} ASC NULLS LAST`, desc(tasks.updatedAt))
+        .limit(limit)
+        .offset(offset),
       db.select({ value: count() }).from(tasks).where(whereClause),
     ])
 

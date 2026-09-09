@@ -18,11 +18,14 @@ async function verifySession(token: string): Promise<boolean> {
 }
 
 const PUBLIC_PATHS = ["/login"]
+// El worker completa su onboarding con el token del link, sin cuenta ni sesión.
+const PUBLIC_PATH_PREFIXES = ["/onboarding/"]
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const isLoginPage = pathname === "/login"
-  const isPublicPage = PUBLIC_PATHS.includes(pathname)
+  const isPublicPage =
+    PUBLIC_PATHS.includes(pathname) || PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   const token = request.cookies.get("session")?.value
   const authenticated = token ? await verifySession(token) : false
 

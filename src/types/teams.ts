@@ -10,3 +10,10 @@ export interface Team {
   createdAt: Date
   members: TeamMemberRef[]
 }
+
+export interface TeamsPage {
+  teams: Team[]
+  total: number
+  page: number
+  totalPages: number
+}

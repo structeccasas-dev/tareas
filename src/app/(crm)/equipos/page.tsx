@@ -5,10 +5,18 @@ import { TeamsShell } from "@/modules/teams/components/TeamsShell"
 import { getSession } from "@/lib/session"
 import { canManageUsers } from "@/lib/permissions"
 
-export default async function EquiposPage() {
+export default async function EquiposPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string; page?: string }>
+}) {
   const session = await getSession()
   if (!session || !canManageUsers(session)) notFound()
 
-  const [teams, users] = await Promise.all([getTeams(), getUsers()])
-  return <TeamsShell teams={teams} users={users} />
+  const params = await searchParams
+  const search = typeof params.search === "string" ? params.search : ""
+  const page = Math.max(1, Number(params.page) || 1)
+
+  const [data, users] = await Promise.all([getTeams({ page, search }), getUsers()])
+  return <TeamsShell data={data} users={users} initialSearch={search} />
 }

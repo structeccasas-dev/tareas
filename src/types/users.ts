@@ -12,6 +12,13 @@ export interface User {
 
 export type OwnProfile = User
 
+export interface UsersPage {
+  users: User[]
+  total: number
+  page: number
+  totalPages: number
+}
+
 export interface SessionUserSummary {
   id: string
   name: string

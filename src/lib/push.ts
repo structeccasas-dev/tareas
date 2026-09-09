@@ -29,7 +29,9 @@ export interface PushPayload {
 export async function sendPushToUser(userId: string, payload: PushPayload): Promise<void> {
   if (!ensureVapidConfigured()) return
 
-  const subscriptions = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId))
+  // Tope defensivo: nadie tiene decenas de dispositivos reales, así que esto
+  // solo protege contra una tabla que creció de forma anómala para un usuario.
+  const subscriptions = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.userId, userId)).limit(20)
   const body = JSON.stringify(payload)
 
   for (const subscription of subscriptions) {
