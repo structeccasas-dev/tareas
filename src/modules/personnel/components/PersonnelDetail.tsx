@@ -15,6 +15,8 @@ import {
   History,
   Plane,
   Plus,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import type {
   DocumentType,
@@ -22,9 +24,11 @@ import type {
   PersonnelDocument,
   PersonnelHistoryPage,
   PersonnelLeave,
+  PersonnelLeavePage,
   ContractType,
   LeaveType,
 } from "@/types/personnel";
+import type { LinkedUserSummary } from "@/modules/personnel/data/queries";
 import {
   createInvitation,
   deletePersonnel,
@@ -34,10 +38,15 @@ import {
   createLeave,
   updateLeave,
   deleteLeave,
+  approveLeave,
+  rejectLeave,
+  linkUserToPersonnel,
+  unlinkUserFromPersonnel,
   type UpdatePersonnelInput,
 } from "@/modules/personnel/actions/personnelActions";
 import { LEAVE_TYPE_LABELS } from "@/modules/personnel/labels";
 import { PersonnelStatusBadge } from "@/modules/personnel/components/PersonnelStatusBadge";
+import { LeaveStatusBadge } from "@/modules/personnel/components/LeaveStatusBadge";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Dialog } from "@/components/Dialog";
@@ -52,7 +61,10 @@ interface PersonnelDetailProps {
   documents: PersonnelDocument[];
   activeInvitationToken: string | null;
   history: PersonnelHistoryPage;
-  leaves: PersonnelLeave[];
+  leaves: PersonnelLeavePage;
+  vacationDaysUsed: number;
+  linkedUser: LinkedUserSummary | null;
+  unlinkedUsers: LinkedUserSummary[];
 }
 
 const DOCUMENT_LABELS: Record<DocumentType, string> = {
@@ -89,6 +101,7 @@ const FIELD_LABELS: Record<string, string> = {
   emergencyContactPhone: "Tel. contacto de emergencia",
   emergencyContactRelationship: "Parentesco contacto de emergencia",
   leave: "Licencia",
+  linkedUser: "Cuenta de usuario vinculada",
 };
 
 function formatHistoryValue(field: string, value: string | null): string {
@@ -103,6 +116,9 @@ export function PersonnelDetail({
   activeInvitationToken,
   history,
   leaves,
+  vacationDaysUsed,
+  linkedUser,
+  unlinkedUsers,
 }: PersonnelDetailProps) {
   const router = useRouter();
   const contract = documents.find((d) => d.type === "contract");
@@ -112,9 +128,14 @@ export function PersonnelDetail({
   const [leaveDialog, setLeaveDialog] = useState<"new" | PersonnelLeave | null>(
     null,
   );
-  const vacationDaysUsed = leaves
-    .filter((l) => l.countsAsVacation)
-    .reduce((sum, l) => sum + Number(l.daysCount), 0);
+  const [decidingLeave, setDecidingLeave] = useState<PersonnelLeave | null>(
+    null,
+  );
+  const [isDeciding, startDeciding] = useTransition();
+
+  function handleApprove(leave: PersonnelLeave) {
+    startDeciding(() => approveLeave(leave.id));
+  }
 
   function handleDelete() {
     startDelete(async () => {
@@ -155,6 +176,11 @@ export function PersonnelDetail({
         <InviteSection
           personnelId={personnel.id}
           activeToken={activeInvitationToken}
+        />
+        <LinkedUserSection
+          personnelId={personnel.id}
+          linkedUser={linkedUser}
+          unlinkedUsers={unlinkedUsers}
         />
         <Card className="p-5">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">
@@ -298,30 +324,31 @@ export function PersonnelDetail({
               {vacationDaysUsed}
             </span>
           </p>
-          {leaves.length === 0 ? (
+          {leaves.leaves.length === 0 ? (
             <p className="text-sm text-gray-400">
               Todavía no hay licencias ni días libres registrados.
             </p>
           ) : (
             <ul className="space-y-2">
-              {leaves.map((leave) => (
+              {leaves.leaves.map((leave) => (
                 <li
                   key={leave.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-border"
+                  className="flex items-center flex-wrap justify-between gap-3 px-3 py-2.5 rounded-xl border border-border"
                 >
                   <button
                     className="min-w-0 text-left flex-1"
                     onClick={() => setLeaveDialog(leave)}
                     aria-label="Editar licencia"
                   >
-                    <p className="text-sm text-gray-900">
+                    <p className="text-sm text-gray-900 flex items-center flex-wrap gap-2">
                       <span className="font-medium">
                         {LEAVE_TYPE_LABELS[leave.type]}
-                      </span>{" "}
+                      </span>
                       · {leave.daysCount}{" "}
                       {Number(leave.daysCount) === 1 ? "día" : "días"}
+                      <LeaveStatusBadge status={leave.status} />
                       {leave.countsAsVacation && (
-                        <span className="ml-2 text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
+                        <span className="text-xs text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
                           Descuenta vacaciones
                         </span>
                       )}
@@ -329,19 +356,55 @@ export function PersonnelDetail({
                     <p className="text-xs text-gray-400 truncate">
                       {leave.startDate} → {leave.endDate}
                       {leave.notes ? ` · ${leave.notes}` : ""}
+                      {leave.status === "rejected" && leave.decisionNote
+                        ? ` · Motivo: ${leave.decisionNote}`
+                        : ""}
                     </p>
                   </button>
-                  <button
-                    onClick={() => deleteLeave(leave.id)}
-                    className="text-gray-300 hover:text-red-600 transition-colors duration-150 flex-shrink-0"
-                    aria-label="Eliminar"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {leave.status === "pending" && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleApprove(leave)}
+                          disabled={isDeciding}
+                          className="!text-green-700 !border-green-200 hover:!bg-green-50"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          Aprobar
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setDecidingLeave(leave)}
+                          disabled={isDeciding}
+                          className="!text-red-700 !border-red-200 hover:!bg-red-50"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          Rechazar
+                        </Button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => deleteLeave(leave.id)}
+                      className="text-gray-300 hover:text-red-600 transition-colors duration-150 ml-1 p-1"
+                      aria-label="Eliminar"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
+          <Pagination
+            page={leaves.page}
+            totalPages={leaves.totalPages}
+            basePath={`/personal/${personnel.id}`}
+            paramName="leavesPage"
+            searchParams={{ page: history.page > 1 ? String(history.page) : undefined }}
+          />
         </Card>
         <Card className="p-5">
           <h2 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -376,7 +439,12 @@ export function PersonnelDetail({
               ))}
             </ul>
           )}
-          <Pagination page={history.page} totalPages={history.totalPages} basePath={`/personal/${personnel.id}`} />
+          <Pagination
+            page={history.page}
+            totalPages={history.totalPages}
+            basePath={`/personal/${personnel.id}`}
+            searchParams={{ leavesPage: leaves.page > 1 ? String(leaves.page) : undefined }}
+          />
         </Card>
       </div>
       <Dialog
@@ -421,7 +489,67 @@ export function PersonnelDetail({
         personnelId={personnel.id}
         leave={leaveDialog !== "new" ? leaveDialog : null}
       />
+      <RejectLeaveDialog
+        leave={decidingLeave}
+        onClose={() => setDecidingLeave(null)}
+      />
     </div>
+  );
+}
+
+function RejectLeaveDialog({
+  leave,
+  onClose,
+}: {
+  leave: PersonnelLeave | null;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [isPending, startTransition] = useTransition();
+
+  function handleReject() {
+    if (!leave) return;
+    startTransition(async () => {
+      await rejectLeave(leave.id, reason);
+      setReason("");
+      onClose();
+    });
+  }
+
+  return (
+    <Dialog open={leave !== null} onClose={onClose} title="Rechazar solicitud">
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600">
+          {leave && (
+            <>
+              <span className="font-medium">
+                {LEAVE_TYPE_LABELS[leave.type]}
+              </span>{" "}
+              · {leave.startDate} → {leave.endDate}
+            </>
+          )}
+        </p>
+        <FormField label="Motivo (opcional)">
+          <Textarea
+            rows={2}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </FormField>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="ghost" onClick={onClose} disabled={isPending}>
+            Cancelar
+          </Button>
+          <Button
+            variant="danger"
+            isLoading={isPending}
+            onClick={handleReject}
+          >
+            Rechazar
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -876,6 +1004,94 @@ function FormField({
       <label className="block text-sm font-medium text-gray-700">{label}</label>
       {children}
     </div>
+  );
+}
+
+function LinkedUserSection({
+  personnelId,
+  linkedUser,
+  unlinkedUsers,
+}: {
+  personnelId: string;
+  linkedUser: LinkedUserSummary | null;
+  unlinkedUsers: LinkedUserSummary[];
+}) {
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function handleLink() {
+    if (!selectedUserId) return;
+    setError(null);
+    startTransition(async () => {
+      try {
+        await linkUserToPersonnel(personnelId, selectedUserId);
+        setSelectedUserId("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo vincular");
+      }
+    });
+  }
+
+  function handleUnlink() {
+    startTransition(() => unlinkUserFromPersonnel(personnelId));
+  }
+
+  return (
+    <Card className="p-5">
+      <h2 className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+        <LinkIcon className="w-4 h-4 text-gray-400" />
+        Cuenta de usuario vinculada
+      </h2>
+      <p className="text-sm text-gray-500 mb-3">
+        Asociá esta persona a su cuenta de acceso para que pueda solicitar
+        vacaciones y licencias desde su perfil.
+      </p>
+      {linkedUser ? (
+        <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-border">
+          <div className="min-w-0">
+            <p className="text-sm text-gray-900 truncate">{linkedUser.name}</p>
+            <p className="text-xs text-gray-400 truncate">{linkedUser.email}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleUnlink}
+            isLoading={isPending}
+          >
+            Desvincular
+          </Button>
+        </div>
+      ) : unlinkedUsers.length === 0 ? (
+        <p className="text-sm text-gray-400">
+          No hay usuarios sin vincular disponibles.
+        </p>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Select
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+          >
+            <option value="">Elegí un usuario…</option>
+            {unlinkedUsers.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.email})
+              </option>
+            ))}
+          </Select>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleLink}
+            disabled={!selectedUserId}
+            isLoading={isPending}
+          >
+            Vincular
+          </Button>
+        </div>
+      )}
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+    </Card>
   );
 }
 

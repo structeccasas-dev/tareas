@@ -1,17 +1,29 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import { Plane, Plus } from "lucide-react"
 import type { OwnProfile, UserRole } from "@/types/users"
+import type { LeaveType, PersonnelLeavePage } from "@/types/personnel"
 import { updateOwnProfile, changeOwnPassword } from "@/modules/profile/actions/profileActions"
+import { requestLeave } from "@/modules/personnel/actions/personnelActions"
+import { LEAVE_TYPE_LABELS } from "@/modules/personnel/labels"
+import { LeaveStatusBadge } from "@/modules/personnel/components/LeaveStatusBadge"
 import { Avatar } from "@/components/Avatar"
 import { PageHeader } from "@/components/PageHeader"
 import { Card } from "@/components/Card"
 import { Input } from "@/components/Input"
+import { Select } from "@/components/Select"
+import { Textarea } from "@/components/Textarea"
 import { Button } from "@/components/Button"
 import { Badge } from "@/components/Badge"
+import { Dialog } from "@/components/Dialog"
+import { Pagination } from "@/components/Pagination"
 
 interface ProfileShellProps {
   profile: OwnProfile
+  personnelId: string | null
+  leaves: PersonnelLeavePage
+  vacationDaysUsed: number
 }
 
 interface FeedbackMsg {
@@ -25,10 +37,11 @@ const ROLE_LABEL: Record<UserRole, string> = {
   agent: "Usuario",
 }
 
-export function ProfileShell({ profile }: ProfileShellProps) {
+export function ProfileShell({ profile, personnelId, leaves, vacationDaysUsed }: ProfileShellProps) {
   const [name, setName] = useState(profile.name)
   const [profileMsg, setProfileMsg] = useState<FeedbackMsg | null>(null)
   const [isSavingProfile, startProfileTransition] = useTransition()
+  const [requestOpen, setRequestOpen] = useState(false)
 
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -107,6 +120,47 @@ export function ProfileShell({ profile }: ProfileShellProps) {
           </form>
         </Card>
 
+        {personnelId && (
+          <Card className="overflow-hidden">
+            <div className="p-5">
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Plane className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  Vacaciones y licencias
+                </h3>
+                <Button variant="secondary" size="sm" onClick={() => setRequestOpen(true)}>
+                  <Plus className="w-3.5 h-3.5" />
+                  Solicitar
+                </Button>
+              </div>
+              <p className="text-sm text-gray-500 mb-4">
+                Días de vacaciones descontados hasta ahora: <span className="font-medium text-gray-900">{vacationDaysUsed}</span>
+              </p>
+              {leaves.leaves.length === 0 ? (
+                <p className="text-sm text-gray-400">Todavía no hiciste ninguna solicitud.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {leaves.leaves.map((leave) => (
+                    <li key={leave.id} className="px-3 py-2.5 rounded-xl border border-border">
+                      <p className="text-sm text-gray-900 flex items-center flex-wrap gap-2">
+                        <span className="font-medium">{LEAVE_TYPE_LABELS[leave.type]}</span>
+                        · {leave.daysCount} {Number(leave.daysCount) === 1 ? "día" : "días"}
+                        <LeaveStatusBadge status={leave.status} />
+                      </p>
+                      <p className="text-xs text-gray-400 break-words">
+                        {leave.startDate} → {leave.endDate}
+                        {leave.notes ? ` · ${leave.notes}` : ""}
+                        {leave.status === "rejected" && leave.decisionNote ? ` · Motivo: ${leave.decisionNote}` : ""}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <Pagination page={leaves.page} totalPages={leaves.totalPages} basePath="/perfil" />
+          </Card>
+        )}
+
         <Card className="p-5 space-y-4">
           <h3 className="text-sm font-semibold text-gray-900">Contraseña</h3>
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
@@ -143,6 +197,7 @@ export function ProfileShell({ profile }: ProfileShellProps) {
           </form>
         </Card>
       </div>
+      {personnelId && <RequestLeaveDialog open={requestOpen} onClose={() => setRequestOpen(false)} />}
     </div>
   )
 }
@@ -153,5 +208,102 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="block text-sm font-medium text-gray-700">{label}</label>
       {children}
     </div>
+  )
+}
+
+const EMPTY_REQUEST_FORM = {
+  type: "vacaciones" as LeaveType,
+  startDate: "",
+  endDate: "",
+  daysCount: "",
+  notes: "",
+}
+
+function RequestLeaveDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [form, setForm] = useState(EMPTY_REQUEST_FORM)
+  const [prevOpen, setPrevOpen] = useState(open)
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (open) {
+      setForm(EMPTY_REQUEST_FORM)
+      setError(null)
+    }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    startTransition(async () => {
+      try {
+        await requestLeave({ ...form, countsAsVacation: form.type === "vacaciones" })
+        onClose()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo enviar la solicitud")
+      }
+    })
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} title="Solicitar vacaciones o licencia">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Tipo">
+          <Select value={form.type} onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as LeaveType }))}>
+            {Object.entries(LEAVE_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Desde">
+            <Input
+              type="date"
+              required
+              value={form.startDate}
+              onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+            />
+          </Field>
+          <Field label="Hasta">
+            <Input
+              type="date"
+              required
+              value={form.endDate}
+              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+            />
+          </Field>
+        </div>
+
+        <Field label="Cantidad de días">
+          <Input
+            type="number"
+            min="0.5"
+            step="0.5"
+            required
+            value={form.daysCount}
+            onChange={(e) => setForm((f) => ({ ...f, daysCount: e.target.value }))}
+          />
+        </Field>
+
+        <Field label="Notas (opcional)">
+          <Textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+        </Field>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>
+            Cancelar
+          </Button>
+          <Button type="submit" isLoading={isPending}>
+            Enviar solicitud
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   )
 }

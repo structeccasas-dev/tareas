@@ -17,6 +17,7 @@ export async function getNotifications(limit = 20): Promise<NotificationItem[]> 
         title: notifications.title,
         body: notifications.body,
         taskId: notifications.taskId,
+        personnelId: notifications.personnelId,
         read: notifications.read,
         createdAt: notifications.createdAt,
       })

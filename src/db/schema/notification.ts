@@ -1,6 +1,7 @@
 import { pgTable, uuid, varchar, text, boolean, timestamp } from "drizzle-orm/pg-core"
 import { tasks } from "./task"
 import { users } from "./user"
+import { personnel } from "./personnel"
 
 export const notifications = pgTable("notifications", {
   id: uuid().defaultRandom().primaryKey(),
@@ -10,14 +11,22 @@ export const notifications = pgTable("notifications", {
     .references(() => users.id, { onDelete: "cascade" })
     .notNull(),
 
-  type: varchar({ length: 30 })
-    .$type<"task_assigned" | "task_reminder" | "task_overdue" | "task_comment" | "task_notify_creator">()
-    .notNull(),
+  type: varchar({ length: 30 }).$type<
+    | "task_assigned"
+    | "task_reminder"
+    | "task_overdue"
+    | "task_comment"
+    | "task_notify_creator"
+    | "leave_requested"
+    | "leave_approved"
+    | "leave_rejected"
+  >().notNull(),
 
   title: varchar({ length: 255 }).notNull(),
   body: text(),
 
   taskId: uuid().references(() => tasks.id, { onDelete: "cascade" }),
+  personnelId: uuid().references(() => personnel.id, { onDelete: "cascade" }),
 
   read: boolean().default(false).notNull(),
 

@@ -43,6 +43,7 @@ interface SidebarProps {
   user: SessionUserSummary | null;
   dueTasksCount?: number;
   unreadCount?: number;
+  pendingLeavesCount?: number;
 }
 
 export function Sidebar({
@@ -50,6 +51,7 @@ export function Sidebar({
   user,
   dueTasksCount = 0,
   unreadCount = 0,
+  pendingLeavesCount = 0,
 }: SidebarProps) {
   const pathname = usePathname();
 
@@ -95,6 +97,11 @@ export function Sidebar({
                   {href === "/tareas" && dueTasksCount > 0 && (
                     <span className="ml-auto flex-shrink-0 min-w-[1.25rem] px-1 h-5 rounded-full bg-amber-500 text-white text-[11px] font-semibold flex items-center justify-center">
                       {dueTasksCount > 99 ? "99+" : dueTasksCount}
+                    </span>
+                  )}
+                  {href === "/personal" && pendingLeavesCount > 0 && (
+                    <span className="ml-auto flex-shrink-0 min-w-[1.25rem] px-1 h-5 rounded-full bg-primary text-white text-[11px] font-semibold flex items-center justify-center">
+                      {pendingLeavesCount > 99 ? "99+" : pendingLeavesCount}
                     </span>
                   )}
                 </Link>
