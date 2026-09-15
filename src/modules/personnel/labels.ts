@@ -1,4 +1,10 @@
-import type { LeaveType } from "@/types/personnel"
+import type { LeaveStatus, LeaveType } from "@/types/personnel"
+
+export const LEAVE_STATUS_LABELS: Record<LeaveStatus, string> = {
+  pending: "Pendiente",
+  approved: "Aprobado",
+  rejected: "Rechazado",
+}
 
 export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
   vacaciones: "Vacaciones",

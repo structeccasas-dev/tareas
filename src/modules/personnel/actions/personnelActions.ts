@@ -5,10 +5,12 @@ import { and, eq } from "drizzle-orm"
 import { refresh } from "next/cache"
 import { db } from "@/db"
 import { personnel, personnelDocuments, personnelHistory, personnelInvitations, personnelLeaves } from "@/db/schema/personnel"
+import { users } from "@/db/schema/user"
 import { getSession } from "@/lib/session"
 import { canManageUsers } from "@/lib/permissions"
 import { savePersonnelFile, deletePersonnelFiles, deletePersonnelFile } from "@/lib/personnelStorage"
-import { getDocumentFile, getInvitationStatus } from "@/modules/personnel/data/queries"
+import { notifyUser, notifyUsers } from "@/lib/notify"
+import { getDocumentFile, getInvitationStatus, getPersonnelByLinkedUser } from "@/modules/personnel/data/queries"
 import { summarizeLeave } from "@/modules/personnel/labels"
 import type { ContractType, LeaveType, Personnel } from "@/types/personnel"
 
@@ -147,6 +149,8 @@ export async function createLeave(personnelId: string, data: CreateLeaveInput): 
 
   const notes = data.notes?.trim() || null
 
+  // Lo que carga un admin directamente queda aprobado de una: no pasa por
+  // el flujo de solicitud, que es solo para lo que pide el propio empleado.
   await db.insert(personnelLeaves).values({
     personnelId,
     type: data.type,
@@ -155,6 +159,9 @@ export async function createLeave(personnelId: string, data: CreateLeaveInput): 
     daysCount: data.daysCount,
     countsAsVacation: data.countsAsVacation,
     notes,
+    status: "approved",
+    decidedBy: session.userId,
+    decidedAt: new Date(),
     createdBy: session.userId,
   })
 
@@ -165,6 +172,125 @@ export async function createLeave(personnelId: string, data: CreateLeaveInput): 
     newValue: summarizeLeave({ ...data, notes }),
     changedBy: session.userId,
   })
+
+  refresh()
+}
+
+// Autoservicio: lo usa el propio empleado desde /perfil para pedir vacaciones
+// u otro tipo de licencia. Queda pendiente hasta que un admin la decida.
+export async function requestLeave(data: CreateLeaveInput): Promise<void> {
+  const session = await getSession()
+  if (!session) throw new Error("No autenticado")
+  validateLeaveInput(data)
+
+  const own = await getPersonnelByLinkedUser(session.userId)
+  if (!own) throw new Error("Tu usuario no está vinculado a un legajo de personal")
+
+  const notes = data.notes?.trim() || null
+
+  await db.insert(personnelLeaves).values({
+    personnelId: own.id,
+    type: data.type,
+    startDate: data.startDate,
+    endDate: data.endDate,
+    daysCount: data.daysCount,
+    countsAsVacation: data.countsAsVacation,
+    notes,
+    status: "pending",
+    createdBy: session.userId,
+  })
+
+  await db.insert(personnelHistory).values({
+    personnelId: own.id,
+    field: "leave",
+    oldValue: null,
+    newValue: `${summarizeLeave({ ...data, notes })} · solicitada por el empleado`,
+    changedBy: session.userId,
+  })
+
+  const admins = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.active, true)))
+  await notifyUsers(
+    admins.map((a) => a.id),
+    {
+      type: "leave_requested",
+      title: "Nueva solicitud de vacaciones",
+      body: `${session.name} solicitó ${summarizeLeave({ ...data, notes })}`,
+      personnelId: own.id,
+      url: `/personal/${own.id}`,
+    },
+  )
+
+  refresh()
+}
+
+async function requireDecidablePendingLeave(id: string) {
+  const [existing] = await db.select().from(personnelLeaves).where(eq(personnelLeaves.id, id)).limit(1)
+  if (!existing) throw new Error("La solicitud no existe")
+  if (existing.status !== "pending") throw new Error("Esta solicitud ya fue decidida")
+  return existing
+}
+
+export async function approveLeave(id: string): Promise<void> {
+  const session = await requireManage()
+  const existing = await requireDecidablePendingLeave(id)
+
+  await db
+    .update(personnelLeaves)
+    .set({ status: "approved", decidedBy: session.userId, decidedAt: new Date() })
+    .where(eq(personnelLeaves.id, id))
+
+  await db.insert(personnelHistory).values({
+    personnelId: existing.personnelId,
+    field: "leave",
+    oldValue: `${summarizeLeave(existing)} · pendiente`,
+    newValue: `${summarizeLeave(existing)} · aprobada`,
+    changedBy: session.userId,
+  })
+
+  const [person] = await db.select({ linkedUserId: personnel.linkedUserId }).from(personnel).where(eq(personnel.id, existing.personnelId)).limit(1)
+  if (person?.linkedUserId) {
+    await notifyUser({
+      userId: person.linkedUserId,
+      type: "leave_approved",
+      title: "Solicitud de vacaciones aprobada",
+      body: summarizeLeave(existing),
+      personnelId: existing.personnelId,
+      url: "/perfil",
+    })
+  }
+
+  refresh()
+}
+
+export async function rejectLeave(id: string, reason?: string): Promise<void> {
+  const session = await requireManage()
+  const existing = await requireDecidablePendingLeave(id)
+  const decisionNote = reason?.trim() || null
+
+  await db
+    .update(personnelLeaves)
+    .set({ status: "rejected", decidedBy: session.userId, decidedAt: new Date(), decisionNote })
+    .where(eq(personnelLeaves.id, id))
+
+  await db.insert(personnelHistory).values({
+    personnelId: existing.personnelId,
+    field: "leave",
+    oldValue: `${summarizeLeave(existing)} · pendiente`,
+    newValue: `${summarizeLeave(existing)} · rechazada${decisionNote ? ` (${decisionNote})` : ""}`,
+    changedBy: session.userId,
+  })
+
+  const [person] = await db.select({ linkedUserId: personnel.linkedUserId }).from(personnel).where(eq(personnel.id, existing.personnelId)).limit(1)
+  if (person?.linkedUserId) {
+    await notifyUser({
+      userId: person.linkedUserId,
+      type: "leave_rejected",
+      title: "Solicitud de vacaciones rechazada",
+      body: decisionNote ? `${summarizeLeave(existing)} · ${decisionNote}` : summarizeLeave(existing),
+      personnelId: existing.personnelId,
+      url: "/perfil",
+    })
+  }
 
   refresh()
 }
@@ -217,6 +343,49 @@ export async function deleteLeave(id: string): Promise<void> {
     personnelId: existing.personnelId,
     field: "leave",
     oldValue: summarizeLeave(existing),
+    newValue: null,
+    changedBy: session.userId,
+  })
+
+  refresh()
+}
+
+export async function linkUserToPersonnel(personnelId: string, userId: string): Promise<void> {
+  const session = await requireManage()
+
+  const [alreadyLinked] = await db.select({ id: personnel.id }).from(personnel).where(eq(personnel.linkedUserId, userId)).limit(1)
+  if (alreadyLinked) throw new Error("Ese usuario ya está vinculado a otro legajo")
+
+  const [targetUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1)
+  if (!targetUser) throw new Error("El usuario no existe")
+
+  await db.update(personnel).set({ linkedUserId: userId, updatedAt: new Date() }).where(eq(personnel.id, personnelId))
+
+  await db.insert(personnelHistory).values({
+    personnelId,
+    field: "linkedUser",
+    oldValue: null,
+    newValue: targetUser.name,
+    changedBy: session.userId,
+  })
+
+  refresh()
+}
+
+export async function unlinkUserFromPersonnel(personnelId: string): Promise<void> {
+  const session = await requireManage()
+
+  const [existing] = await db.select({ linkedUserId: personnel.linkedUserId }).from(personnel).where(eq(personnel.id, personnelId)).limit(1)
+  if (!existing?.linkedUserId) return
+
+  const [linkedUser] = await db.select({ name: users.name }).from(users).where(eq(users.id, existing.linkedUserId)).limit(1)
+
+  await db.update(personnel).set({ linkedUserId: null, updatedAt: new Date() }).where(eq(personnel.id, personnelId))
+
+  await db.insert(personnelHistory).values({
+    personnelId,
+    field: "linkedUser",
+    oldValue: linkedUser?.name ?? null,
     newValue: null,
     changedBy: session.userId,
   })

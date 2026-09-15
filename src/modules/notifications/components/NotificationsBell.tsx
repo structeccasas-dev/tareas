@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
-import { Bell, CheckCheck, UserPlus, Clock, AlertTriangle, MessageSquare, BellRing } from "lucide-react"
+import { Bell, CheckCheck, UserPlus, Clock, AlertTriangle, MessageSquare, BellRing, Plane, CheckCircle2, XCircle } from "lucide-react"
 import type { NotificationItem, NotificationType } from "@/types/notifications"
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead } from "@/modules/notifications/actions/notificationActions"
 import { formatRelativeTime } from "@/lib/format"
@@ -14,6 +14,17 @@ const ICONS: Record<NotificationType, typeof Bell> = {
   task_overdue: AlertTriangle,
   task_comment: MessageSquare,
   task_notify_creator: BellRing,
+  leave_requested: Plane,
+  leave_approved: CheckCircle2,
+  leave_rejected: XCircle,
+}
+
+// A dónde navega cada tipo al hacer click: las de licencias no son sobre
+// tareas, así que no tiene sentido mandarlas siempre a /tareas.
+function notificationHref(item: NotificationItem): string {
+  if (item.type === "leave_requested") return item.personnelId ? `/personal/${item.personnelId}` : "/personal"
+  if (item.type === "leave_approved" || item.type === "leave_rejected") return "/perfil"
+  return "/tareas"
 }
 
 const noopSubscribe = () => () => {}
@@ -59,7 +70,7 @@ export function NotificationsBell({ initialUnreadCount }: NotificationsBellProps
       startTransition(() => markNotificationRead(item.id))
     }
     setOpen(false)
-    router.push("/tareas")
+    router.push(notificationHref(item))
   }
 
   function handleMarkAllRead() {

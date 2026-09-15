@@ -109,6 +109,17 @@ export const personnelLeaves = pgTable("personnel_leaves", {
 
   notes: text(),
 
+  // "approved" para lo que carga directamente un admin; "pending" para lo
+  // que el propio empleado solicita desde su perfil, hasta que se decide.
+  status: varchar({ length: 20 })
+    .$type<"pending" | "approved" | "rejected">()
+    .notNull()
+    .default("approved"),
+
+  decidedBy: uuid().references(() => users.id),
+  decidedAt: timestamp(),
+  decisionNote: text(),
+
   createdBy: uuid()
     .references(() => users.id)
     .notNull(),

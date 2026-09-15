@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, isNull, or } from "drizzle-orm"
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm"
 import { db } from "@/db"
 import { personnel, personnelDocuments, personnelHistory, personnelInvitations, personnelLeaves } from "@/db/schema/personnel"
 import { users } from "@/db/schema/user"
@@ -7,18 +7,19 @@ import type {
   PersonnelDocument,
   PersonnelHistoryPage,
   PersonnelInvitation,
-  PersonnelLeave,
+  PersonnelLeavePage,
   PersonnelPage,
 } from "@/types/personnel"
 
 const PAGE_LIMIT = 20
-// Topes defensivos para sub-listas por persona (documentos, licencias): en la
-// práctica nunca se acercan a este volumen, así que no justifican su propia
-// paginación en la UI — solo evitan una consulta sin límite.
+// Tope defensivo para documentos por persona: en la práctica nunca se acerca
+// a este volumen, así que no justifica su propia paginación en la UI — solo
+// evita una consulta sin límite.
 const SUBLIST_CAP = 200
+const LEAVES_PAGE_LIMIT = 10
 
 export async function getPersonnelList(opts: { page: number; search?: string }): Promise<PersonnelPage> {
-  const empty: PersonnelPage = { personnel: [], total: 0, page: 1, totalPages: 1 }
+  const empty: PersonnelPage = { personnel: [], total: 0, page: 1, totalPages: 1, pendingLeaveIds: [] }
   try {
     const page = Math.max(1, opts.page)
     const s = opts.search?.trim()
@@ -30,8 +31,22 @@ export async function getPersonnelList(opts: { page: number; search?: string }):
       db.select({ value: count() }).from(personnel).where(whereClause),
     ])
 
+    const ids = rows.map((r) => r.id)
+    const pendingRows = ids.length
+      ? await db
+          .selectDistinct({ personnelId: personnelLeaves.personnelId })
+          .from(personnelLeaves)
+          .where(and(inArray(personnelLeaves.personnelId, ids), eq(personnelLeaves.status, "pending")))
+      : []
+
     const total = Number(countRow?.value ?? 0)
-    return { personnel: rows, total, page, totalPages: Math.max(1, Math.ceil(total / PAGE_LIMIT)) }
+    return {
+      personnel: rows,
+      total,
+      page,
+      totalPages: Math.max(1, Math.ceil(total / PAGE_LIMIT)),
+      pendingLeaveIds: pendingRows.map((r) => r.personnelId),
+    }
   } catch {
     return empty
   }
@@ -40,6 +55,64 @@ export async function getPersonnelList(opts: { page: number; search?: string }):
 export async function getPersonnelById(id: string): Promise<Personnel | null> {
   const [row] = await db.select().from(personnel).where(eq(personnel.id, id)).limit(1)
   return row ?? null
+}
+
+// Legajo del usuario logueado, para el autoservicio de licencias desde /perfil.
+export async function getPersonnelByLinkedUser(userId: string): Promise<Personnel | null> {
+  const [row] = await db.select().from(personnel).where(eq(personnel.linkedUserId, userId)).limit(1)
+  return row ?? null
+}
+
+export interface LinkedUserSummary {
+  id: string
+  name: string
+  email: string
+}
+
+export async function getLinkedUser(userId: string | null): Promise<LinkedUserSummary | null> {
+  if (!userId) return null
+  const [row] = await db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.id, userId)).limit(1)
+  return row ?? null
+}
+
+// Usuarios que todavía no tienen ningún legajo vinculado — para elegir a quién
+// asociar un "Personal" existente desde su detalle.
+export async function getUnlinkedUsers(): Promise<LinkedUserSummary[]> {
+  return db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .leftJoin(personnel, eq(personnel.linkedUserId, users.id))
+    .where(and(eq(users.active, true), isNull(personnel.id)))
+    .orderBy(asc(users.name))
+}
+
+// Total de días de vacaciones descontados — agregado en la base, no depende
+// de qué página de licencias esté visible en la UI.
+export async function getVacationDaysUsed(personnelId: string): Promise<number> {
+  try {
+    const [row] = await db
+      .select({ value: sql<string>`coalesce(sum(${personnelLeaves.daysCount}), 0)` })
+      .from(personnelLeaves)
+      .where(
+        and(
+          eq(personnelLeaves.personnelId, personnelId),
+          eq(personnelLeaves.countsAsVacation, true),
+          eq(personnelLeaves.status, "approved"),
+        ),
+      )
+    return Number(row?.value ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+export async function getPendingLeavesCount(): Promise<number> {
+  try {
+    const [row] = await db.select({ value: count() }).from(personnelLeaves).where(eq(personnelLeaves.status, "pending"))
+    return Number(row?.value ?? 0)
+  } catch {
+    return 0
+  }
 }
 
 export async function getDocumentsForPersonnel(personnelId: string): Promise<PersonnelDocument[]> {
@@ -108,13 +181,29 @@ export async function getInvitationStatus(token: string): Promise<InvitationStat
   return { valid: true, invitation: row.invitation, personnelName: row.personnelName }
 }
 
-export async function getLeavesForPersonnel(personnelId: string): Promise<PersonnelLeave[]> {
-  return db
-    .select()
-    .from(personnelLeaves)
-    .where(eq(personnelLeaves.personnelId, personnelId))
-    .orderBy(desc(personnelLeaves.startDate))
-    .limit(SUBLIST_CAP)
+export async function getLeavesForPersonnel(personnelId: string, opts: { page: number }): Promise<PersonnelLeavePage> {
+  const empty: PersonnelLeavePage = { leaves: [], total: 0, page: 1, totalPages: 1 }
+  try {
+    const page = Math.max(1, opts.page)
+    const offset = (page - 1) * LEAVES_PAGE_LIMIT
+    const whereClause = eq(personnelLeaves.personnelId, personnelId)
+
+    const [rows, [countRow]] = await Promise.all([
+      db
+        .select()
+        .from(personnelLeaves)
+        .where(whereClause)
+        .orderBy(desc(personnelLeaves.startDate))
+        .limit(LEAVES_PAGE_LIMIT)
+        .offset(offset),
+      db.select({ value: count() }).from(personnelLeaves).where(whereClause),
+    ])
+
+    const total = Number(countRow?.value ?? 0)
+    return { leaves: rows, total, page, totalPages: Math.max(1, Math.ceil(total / LEAVES_PAGE_LIMIT)) }
+  } catch {
+    return empty
+  }
 }
 
 const HISTORY_PAGE_LIMIT = 20

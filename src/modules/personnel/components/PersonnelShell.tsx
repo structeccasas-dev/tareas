@@ -10,6 +10,7 @@ import { PersonnelStatusBadge } from "@/modules/personnel/components/PersonnelSt
 import { Dialog } from "@/components/Dialog"
 import { Button } from "@/components/Button"
 import { Card } from "@/components/Card"
+import { Badge } from "@/components/Badge"
 import { Input } from "@/components/Input"
 import { Select } from "@/components/Select"
 import { Avatar } from "@/components/Avatar"
@@ -38,7 +39,8 @@ const EMPTY_FORM: FormState = {
 }
 
 export function PersonnelShell({ data, initialSearch }: PersonnelShellProps) {
-  const { personnel, page, totalPages } = data
+  const { personnel, page, totalPages, pendingLeaveIds } = data
+  const pendingSet = new Set(pendingLeaveIds)
   const router = useRouter()
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -148,7 +150,14 @@ export function PersonnelShell({ data, initialSearch }: PersonnelShellProps) {
                       </td>
                       <td className="px-4 py-3.5 hidden sm:table-cell text-gray-600">{p.position ?? "—"}</td>
                       <td className="px-4 py-3.5">
-                        <PersonnelStatusBadge status={p.status} />
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <PersonnelStatusBadge status={p.status} />
+                          {pendingSet.has(p.id) && (
+                            <Badge tone="warning" dot>
+                              Solicitud pendiente
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

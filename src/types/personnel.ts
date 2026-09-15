@@ -4,6 +4,8 @@ export type PersonnelStatus = "invitado" | "datos_completados" | "contrato_subid
 
 export type DocumentType = "id_front" | "id_back" | "contract" | "other"
 
+export type LeaveStatus = "pending" | "approved" | "rejected"
+
 export type LeaveType =
   | "vacaciones"
   | "enfermedad"
@@ -70,6 +72,10 @@ export interface PersonnelLeave {
   daysCount: string
   countsAsVacation: boolean
   notes: string | null
+  status: LeaveStatus
+  decidedBy: string | null
+  decidedAt: Date | null
+  decisionNote: string | null
   createdBy: string
   createdAt: Date
 }
@@ -90,10 +96,18 @@ export interface PersonnelPage {
   total: number
   page: number
   totalPages: number
+  pendingLeaveIds: string[]
 }
 
 export interface PersonnelHistoryPage {
   history: PersonnelHistoryEntry[]
+  total: number
+  page: number
+  totalPages: number
+}
+
+export interface PersonnelLeavePage {
+  leaves: PersonnelLeave[]
   total: number
   page: number
   totalPages: number

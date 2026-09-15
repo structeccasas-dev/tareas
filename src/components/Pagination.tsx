@@ -6,9 +6,12 @@ interface PaginationProps {
   totalPages: number
   basePath: string
   searchParams?: Record<string, string | undefined>
+  // Nombre del query param a usar — permite tener más de una lista paginada
+  // en la misma página sin que se pisen entre sí (ej. "page" e "leavesPage").
+  paramName?: string
 }
 
-export function Pagination({ page, totalPages, basePath, searchParams = {} }: PaginationProps) {
+export function Pagination({ page, totalPages, basePath, searchParams = {}, paramName = "page" }: PaginationProps) {
   if (totalPages <= 1) return null
 
   function hrefFor(target: number) {
@@ -16,7 +19,8 @@ export function Pagination({ page, totalPages, basePath, searchParams = {} }: Pa
     for (const [key, value] of Object.entries(searchParams)) {
       if (value) params.set(key, value)
     }
-    if (target > 1) params.set("page", String(target))
+    if (target > 1) params.set(paramName, String(target))
+    else params.delete(paramName)
     const qs = params.toString()
     return `${basePath}${qs ? `?${qs}` : ""}`
   }
