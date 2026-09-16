@@ -5,6 +5,15 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // sharp (usado en src/lib/personnelStorage.ts para redimensionar fotos de
+  // carnet) se llama directo desde un Server Action, no vía next/image. El
+  // tracing automático de archivos de Next.js no detecta el binario nativo
+  // de sharp (libvips) en ese caso, así que en prod falla con
+  // ERR_DLOPEN_FAILED al no encontrarlo en la función serverless. Hay que
+  // incluirlo a mano.
+  outputFileTracingIncludes: {
+    "/*": ["node_modules/sharp/**/*", "node_modules/@img/**/*"],
+  },
   experimental: {
     // Las fotos de carnet del onboarding y los PDF de contratos firmados
     // (escaneados, a veces de varias páginas) superan el límite por defecto
