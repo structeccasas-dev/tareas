@@ -12,6 +12,7 @@ import {
   LogOut,
   CheckSquare,
   IdCard,
+  Wallet,
 } from "lucide-react";
 import { logout } from "@/lib/auth";
 import { Avatar } from "@/components/Avatar";
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
     roles: ["admin"],
   },
   { href: "/personal", label: "Personal", icon: IdCard, roles: ["admin"] },
+  { href: "/cobranzas", label: "Cobranzas", icon: Wallet, roles: ["admin"] },
   { href: "/users", label: "Usuarios", icon: UserCog, roles: ["admin"] },
   { href: "/equipos", label: "Equipos", icon: Users2, roles: ["admin"] },
 ] as const satisfies {
@@ -44,6 +46,7 @@ interface SidebarProps {
   dueTasksCount?: number;
   unreadCount?: number;
   pendingLeavesCount?: number;
+  overdueCollectionsCount?: number;
 }
 
 export function Sidebar({
@@ -52,6 +55,7 @@ export function Sidebar({
   dueTasksCount = 0,
   unreadCount = 0,
   pendingLeavesCount = 0,
+  overdueCollectionsCount = 0,
 }: SidebarProps) {
   const pathname = usePathname();
 
@@ -102,6 +106,11 @@ export function Sidebar({
                   {href === "/personal" && pendingLeavesCount > 0 && (
                     <span className="ml-auto flex-shrink-0 min-w-[1.25rem] px-1 h-5 rounded-full bg-primary text-white text-[11px] font-semibold flex items-center justify-center">
                       {pendingLeavesCount > 99 ? "99+" : pendingLeavesCount}
+                    </span>
+                  )}
+                  {href === "/cobranzas" && overdueCollectionsCount > 0 && (
+                    <span className="ml-auto flex-shrink-0 min-w-[1.25rem] px-1 h-5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center">
+                      {overdueCollectionsCount > 99 ? "99+" : overdueCollectionsCount}
                     </span>
                   )}
                 </Link>

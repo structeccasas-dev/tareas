@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, uuid, text, timestamp, index } from "drizzle-orm/pg-core"
 import { users } from "./user"
 
 export const pushSubscriptions = pgTable("push_subscriptions", {
@@ -13,4 +13,4 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   auth: text().notNull(),
 
   createdAt: timestamp().defaultNow().notNull(),
-})
+}, (t) => [index("push_subscriptions_user_idx").on(t.userId)])

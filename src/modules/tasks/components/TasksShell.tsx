@@ -55,9 +55,9 @@ const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
 
 const REMINDER_OPTIONS: { value: number; label: string }[] = [
   { value: 0, label: "En el momento" },
-  { value: 10, label: "10 min antes" },
-  { value: 30, label: "30 min antes" },
   { value: 60, label: "1 hora antes" },
+  { value: 120, label: "2 horas antes" },
+  { value: 180, label: "3 horas antes" },
   { value: 1440, label: "1 día antes" },
   { value: 4320, label: "3 días antes" },
 ];

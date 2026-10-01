@@ -86,6 +86,28 @@ export async function getTeamMemberIdsBulk(teamIds: string[]): Promise<string[]>
   }
 }
 
+// Igual que getTeamMemberIdsBulk, pero agrupado por equipo: para resolver
+// destinatarios de varios ítems (cada uno con su propio equipo) con una sola
+// query en vez de una por ítem.
+export async function getTeamMembersGroupedByTeam(teamIds: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>()
+  if (teamIds.length === 0) return map
+  try {
+    const rows = await db
+      .select({ teamId: teamMembers.teamId, userId: teamMembers.userId })
+      .from(teamMembers)
+      .where(inArray(teamMembers.teamId, teamIds))
+    for (const row of rows) {
+      const list = map.get(row.teamId) ?? []
+      list.push(row.userId)
+      map.set(row.teamId, list)
+    }
+  } catch {
+    return map
+  }
+  return map
+}
+
 export interface TeamMemberEntry {
   teamId: string
   userId: string

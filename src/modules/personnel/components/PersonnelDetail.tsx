@@ -654,11 +654,10 @@ function EditPersonnelDialog({
             </FormField>
             {form.contractType === "prueba" && (
               <FormField label="Fin período de prueba">
-                <Input
-                  type="date"
-                  value={form.probationEndDate ?? ""}
-                  onChange={(e) => set("probationEndDate", e.target.value)}
-                />
+                <p className="text-sm text-gray-700">
+                  {form.startDate ? computeProbationEndDateLabel(form.startDate) : "—"}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">Se calcula solo: 89 días desde la fecha de ingreso.</p>
               </FormField>
             )}
             <FormField label="Salario">
@@ -988,6 +987,14 @@ function Field({
       <dd className="text-gray-900 mt-0.5">{value || "—"}</dd>
     </div>
   );
+}
+
+const PROBATION_PERIOD_DAYS = 89;
+
+function computeProbationEndDateLabel(startDate: string): string {
+  const d = new Date(`${startDate}T00:00:00`);
+  d.setDate(d.getDate() + PROBATION_PERIOD_DAYS);
+  return d.toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function FormField({

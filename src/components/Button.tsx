@@ -42,7 +42,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         disabled={disabled || isLoading}
-        className={`inline-flex items-center justify-center rounded-xl font-medium transition-all duration-200 ease-out hover:-translate-y-px active:translate-y-0 active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none disabled:translate-y-0 disabled:scale-100 disabled:shadow-none ${VARIANT_CLS[variant]} ${SIZE_CLS[size]} ${className}`}
+        className={`inline-flex cursor-pointer items-center justify-center rounded-xl font-medium transition-all duration-200 ease-out hover:-translate-y-px active:translate-y-0 active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none disabled:translate-y-0 disabled:scale-100 disabled:shadow-none ${VARIANT_CLS[variant]} ${SIZE_CLS[size]} ${className}`}
         {...props}
       >
         {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

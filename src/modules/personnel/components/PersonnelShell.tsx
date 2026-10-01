@@ -27,7 +27,6 @@ interface FormState {
   position: string
   contractType: ContractType
   startDate: string
-  probationEndDate: string
 }
 
 const EMPTY_FORM: FormState = {
@@ -35,7 +34,14 @@ const EMPTY_FORM: FormState = {
   position: "",
   contractType: "prueba",
   startDate: "",
-  probationEndDate: "",
+}
+
+const PROBATION_PERIOD_DAYS = 89
+
+function computeProbationEndDateLabel(startDate: string): string {
+  const d = new Date(`${startDate}T00:00:00`)
+  d.setDate(d.getDate() + PROBATION_PERIOD_DAYS)
+  return d.toLocaleDateString("es-BO", { day: "2-digit", month: "2-digit", year: "numeric" })
 }
 
 export function PersonnelShell({ data, initialSearch }: PersonnelShellProps) {
@@ -212,13 +218,11 @@ export function PersonnelShell({ data, initialSearch }: PersonnelShellProps) {
           </Field>
 
           {form.contractType === "prueba" && (
-            <Field label="Fin del período de prueba">
-              <Input
-                type="date"
-                value={form.probationEndDate}
-                onChange={(e) => setForm((f) => ({ ...f, probationEndDate: e.target.value }))}
-              />
-            </Field>
+            <p className="text-sm text-gray-500">
+              El período de prueba dura {PROBATION_PERIOD_DAYS} días desde el ingreso
+              {form.startDate ? ` (vence el ${computeProbationEndDateLabel(form.startDate)})` : ""} y se calcula solo. Al crear
+              se genera una tarea para los admins.
+            </p>
           )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}

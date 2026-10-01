@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, integer, timestamp, type AnyPgColumn } from "drizzle-orm/pg-core"
+import { pgTable, uuid, varchar, text, integer, timestamp, index, type AnyPgColumn } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 import { users } from "./user"
 import { teams } from "./team"
 import { projects } from "./project"
@@ -66,4 +67,9 @@ export const tasks = pgTable("tasks", {
 
   createdAt: timestamp().defaultNow().notNull(),
   updatedAt: timestamp().defaultNow().notNull(),
-})
+}, (t) => [
+  // Cron de vencidas: sólo tareas abiertas con fecha límite sin avisar.
+  index("tasks_overdue_pending_idx")
+    .on(t.dueAt)
+    .where(sql`${t.dueAt} is not null and ${t.overdueNotifiedAt} is null and ${t.status} not in ('done', 'cancelled')`),
+])

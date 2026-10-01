@@ -57,3 +57,8 @@ export function canManageTask(
   if (task.assignedTeamId) return userTeamIds.includes(task.assignedTeamId)
   return task.assignedTo === null
 }
+
+// Cobranzas/cartera es de gestión exclusiva de administración.
+export function canManageCollections(session: Pick<SessionPayload, "role">): boolean {
+  return isAdmin(session)
+}
