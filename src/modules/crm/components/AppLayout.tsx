@@ -3,6 +3,7 @@ import { getSessionUserSummary } from "@/modules/profile/data/queries"
 import { getDueTasksCount } from "@/modules/tasks/data/queries"
 import { getUnreadNotificationsCount } from "@/modules/notifications/data/queries"
 import { getPendingLeavesCount } from "@/modules/personnel/data/queries"
+import { getOverdueOperationsCount } from "@/modules/collections/data/queries"
 import { PushOptInLoader } from "@/modules/notifications/components/PushOptInLoader"
 import { Sidebar } from "./Sidebar"
 import { MobileNav } from "./MobileNav"
@@ -15,11 +16,12 @@ interface AppLayoutProps {
 export async function AppLayout({ children }: AppLayoutProps) {
   const session = await getSession()
   const role = session?.role ?? "agent"
-  const [user, dueTasksCount, unreadCount, pendingLeavesCount] = await Promise.all([
+  const [user, dueTasksCount, unreadCount, pendingLeavesCount, overdueCollectionsCount] = await Promise.all([
     session ? getSessionUserSummary() : Promise.resolve(null),
     session ? getDueTasksCount() : Promise.resolve(0),
     session ? getUnreadNotificationsCount() : Promise.resolve(0),
     role === "admin" ? getPendingLeavesCount() : Promise.resolve(0),
+    role === "admin" ? getOverdueOperationsCount() : Promise.resolve(0),
   ])
 
   return (
@@ -34,6 +36,7 @@ export async function AppLayout({ children }: AppLayoutProps) {
           dueTasksCount={dueTasksCount}
           unreadCount={unreadCount}
           pendingLeavesCount={pendingLeavesCount}
+          overdueCollectionsCount={overdueCollectionsCount}
         />
       </div>
       <DesktopSidebarShell
@@ -44,6 +47,7 @@ export async function AppLayout({ children }: AppLayoutProps) {
             dueTasksCount={dueTasksCount}
             unreadCount={unreadCount}
             pendingLeavesCount={pendingLeavesCount}
+            overdueCollectionsCount={overdueCollectionsCount}
           />
         }
       >

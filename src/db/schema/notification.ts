@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, boolean, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, uuid, varchar, text, boolean, timestamp, index } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 import { tasks } from "./task"
 import { users } from "./user"
 import { personnel } from "./personnel"
@@ -31,4 +32,10 @@ export const notifications = pgTable("notifications", {
   read: boolean().default(false).notNull(),
 
   createdAt: timestamp().defaultNow().notNull(),
-})
+}, (t) => [
+  // Listado de la campanita: últimas N del usuario.
+  index("notifications_user_created_idx").on(t.userId, t.createdAt.desc()),
+  // Contador de no leídas.
+  index("notifications_user_unread_idx").on(t.userId).where(sql`${t.read} = false`),
+  index("notifications_task_idx").on(t.taskId),
+])

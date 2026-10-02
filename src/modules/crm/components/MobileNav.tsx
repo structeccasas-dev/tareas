@@ -14,9 +14,17 @@ interface MobileNavProps {
   dueTasksCount?: number
   unreadCount?: number
   pendingLeavesCount?: number
+  overdueCollectionsCount?: number
 }
 
-export function MobileNav({ role, user, dueTasksCount = 0, unreadCount = 0, pendingLeavesCount = 0 }: MobileNavProps) {
+export function MobileNav({
+  role,
+  user,
+  dueTasksCount = 0,
+  unreadCount = 0,
+  pendingLeavesCount = 0,
+  overdueCollectionsCount = 0,
+}: MobileNavProps) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
 
@@ -94,6 +102,7 @@ export function MobileNav({ role, user, dueTasksCount = 0, unreadCount = 0, pend
                 dueTasksCount={dueTasksCount}
                 unreadCount={unreadCount}
                 pendingLeavesCount={pendingLeavesCount}
+                overdueCollectionsCount={overdueCollectionsCount}
               />
             </motion.div>
           </div>

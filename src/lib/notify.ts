@@ -1,7 +1,7 @@
 import "server-only"
 import { db } from "@/db"
 import { notifications } from "@/db/schema/notification"
-import { sendPushToUser } from "@/lib/push"
+import { sendPushToUser, sendPushToUsers } from "@/lib/push"
 import type { NotificationType } from "@/types/notifications"
 
 interface NotifyUserParams {
@@ -29,5 +29,44 @@ export async function notifyUsers(
   excludeUserId?: string,
 ): Promise<void> {
   const recipients = userIds.filter((id) => id !== excludeUserId)
-  await Promise.all(recipients.map((userId) => notifyUser({ ...params, userId })))
+  await notifyUsersBatch([{ ...params, userIds: recipients }])
+}
+
+export interface NotifyBatchJob {
+  userIds: string[]
+  type: NotificationType
+  title: string
+  body: string
+  taskId?: string
+  personnelId?: string
+  url?: string
+}
+
+// Versión batcheada de notifyUsers para cuando hay muchos jobs de notificación
+// a la vez (ej. el cron de tareas recorriendo varios recordatorios/vencidas):
+// un solo INSERT y una sola query de suscripciones push en vez de uno por
+// destinatario, evitando el N+1 de llamar notifyUsers dentro de un loop.
+export async function notifyUsersBatch(jobs: NotifyBatchJob[]): Promise<void> {
+  const rows = jobs.flatMap((job) =>
+    job.userIds.map((userId) => ({
+      userId,
+      type: job.type,
+      title: job.title,
+      body: job.body,
+      taskId: job.taskId ?? null,
+      personnelId: job.personnelId ?? null,
+    })),
+  )
+  if (rows.length === 0) return
+
+  await db.insert(notifications).values(rows)
+
+  await sendPushToUsers(
+    jobs.flatMap((job) =>
+      job.userIds.map((userId) => ({
+        userId,
+        payload: { title: job.title, body: job.body, url: job.url ?? "/tareas", tag: job.taskId ?? job.personnelId },
+      })),
+    ),
+  )
 }

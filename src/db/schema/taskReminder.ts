@@ -1,4 +1,5 @@
-import { pgTable, uuid, integer, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, uuid, integer, timestamp, index } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
 import { tasks } from "./task"
 
 export const taskReminders = pgTable("task_reminders", {
@@ -14,4 +15,8 @@ export const taskReminders = pgTable("task_reminders", {
   notifiedAt: timestamp(),
 
   createdAt: timestamp().defaultNow().notNull(),
-})
+}, (t) => [
+  index("task_reminders_task_idx").on(t.taskId),
+  // Cron de recordatorios: sólo los que todavía no se avisaron.
+  index("task_reminders_pending_idx").on(t.taskId).where(sql`${t.notifiedAt} is null`),
+])

@@ -1,20 +1,85 @@
 "use server"
 
 import crypto from "crypto"
+import { addDays, format } from "date-fns"
 import { and, eq } from "drizzle-orm"
 import { refresh } from "next/cache"
 import { db } from "@/db"
 import { personnel, personnelDocuments, personnelHistory, personnelInvitations, personnelLeaves } from "@/db/schema/personnel"
 import { users } from "@/db/schema/user"
+import { tasks } from "@/db/schema/task"
 import { getSession } from "@/lib/session"
 import { canManageUsers } from "@/lib/permissions"
 import { savePersonnelFile, deletePersonnelFiles, deletePersonnelFile } from "@/lib/personnelStorage"
 import { notifyUser, notifyUsers } from "@/lib/notify"
+import { logActivity } from "@/lib/activityLog"
 import { getDocumentFile, getInvitationStatus, getPersonnelByLinkedUser } from "@/modules/personnel/data/queries"
 import { summarizeLeave } from "@/modules/personnel/labels"
 import type { ContractType, LeaveType, Personnel } from "@/types/personnel"
 
 const INVITATION_VALID_DAYS = 7
+
+// Duración fija del período de prueba: nunca se carga a mano, siempre se
+// deriva de `startDate` (ver createPersonnel/updatePersonnel).
+const PROBATION_PERIOD_DAYS = 89
+
+function computeProbationEndDate(startDate: string): string {
+  return format(addDays(new Date(`${startDate}T00:00:00`), PROBATION_PERIOD_DAYS), "yyyy-MM-dd")
+}
+
+// Al ingresar a alguien en período de prueba, cada admin recibe su propia
+// tarea para decidir qué hacer con esa persona antes de que venza (no hay
+// forma de "asignar a un rol" en el modelo de tareas, así que se crea una
+// copia por admin — mismo patrón que el fan-out de notifyUsers en requestLeave).
+async function createProbationReviewTasks(params: {
+  personnelId: string
+  fullName: string
+  probationEndDate: string | null
+  actingUserId: string
+}) {
+  const admins = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.active, true)))
+  if (admins.length === 0) return
+
+  const dueAt = params.probationEndDate ? new Date(`${params.probationEndDate}T00:00:00`) : null
+  const title = `Definir continuidad de ${params.fullName} (fin de período de prueba)`
+  const description = params.probationEndDate
+    ? `El período de prueba de ${params.fullName} vence el ${params.probationEndDate}. Decidir si continúa, cambia de tipo de contrato o se da de baja.`
+    : `Decidir si ${params.fullName} continúa tras su período de prueba.`
+
+  for (const admin of admins) {
+    const [createdTask] = await db
+      .insert(tasks)
+      .values({
+        title,
+        description,
+        createdBy: params.actingUserId,
+        assignedTo: admin.id,
+        assignedBy: params.actingUserId,
+        status: "todo",
+        priority: "high",
+        dueAt,
+      })
+      .returning({ id: tasks.id })
+
+    await logActivity({
+      entityType: "task",
+      entityId: createdTask.id,
+      action: "created",
+      description: `Creó la tarea "${title}"`,
+      userId: params.actingUserId,
+    })
+
+    await notifyUser({
+      userId: admin.id,
+      type: "task_assigned",
+      title: "Nueva tarea asignada",
+      body: `Definir continuidad de ${params.fullName} al terminar su período de prueba`,
+      taskId: createdTask.id,
+      personnelId: params.personnelId,
+      url: `/personal/${params.personnelId}`,
+    })
+  }
+}
 
 async function requireManage() {
   const session = await getSession()
@@ -29,7 +94,6 @@ interface CreatePersonnelInput {
   position: string
   contractType: ContractType
   startDate: string
-  probationEndDate?: string
 }
 
 export async function createPersonnel(data: CreatePersonnelInput): Promise<{ id: string }> {
@@ -37,17 +101,25 @@ export async function createPersonnel(data: CreatePersonnelInput): Promise<{ id:
   const fullName = data.fullName.trim()
   if (!fullName) throw new Error("El nombre no puede estar vacío")
 
+  const startDate = data.startDate || null
+  const isProbation = data.contractType === "prueba"
+  const probationEndDate = isProbation && startDate ? computeProbationEndDate(startDate) : null
+
   const [created] = await db
     .insert(personnel)
     .values({
       fullName,
       position: data.position.trim() || null,
       contractType: data.contractType,
-      startDate: data.startDate || null,
-      probationEndDate: data.contractType === "prueba" ? data.probationEndDate || null : null,
+      startDate,
+      probationEndDate,
       createdBy: session.userId,
     })
     .returning({ id: personnel.id })
+
+  if (isProbation) {
+    await createProbationReviewTasks({ personnelId: created.id, fullName, probationEndDate, actingUserId: session.userId })
+  }
 
   refresh()
   return created
@@ -93,11 +165,12 @@ export async function updatePersonnel(id: string, data: UpdatePersonnelInput): P
     if (!trimmed) throw new Error("El nombre no puede estar vacío")
     normalized.fullName = trimmed
   }
-  // El fin de período de prueba solo tiene sentido mientras el contrato sigue en prueba.
+  // probationEndDate nunca se acepta del cliente: siempre se deriva de
+  // startDate + PROBATION_PERIOD_DAYS mientras el contrato siga en "prueba".
   const effectiveContractType = (normalized.contractType ?? existing.contractType) as ContractType | null
-  if (effectiveContractType !== "prueba") {
-    normalized.probationEndDate = null
-  }
+  const effectiveStartDate = normalized.startDate !== undefined ? normalized.startDate : existing.startDate
+  normalized.probationEndDate =
+    effectiveContractType === "prueba" && effectiveStartDate ? computeProbationEndDate(effectiveStartDate) : null
 
   const updateValues: Record<string, string | null> = {}
   const historyRows: (typeof personnelHistory.$inferInsert)[] = []
