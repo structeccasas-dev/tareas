@@ -152,6 +152,8 @@ export interface Installment {
   paidInterest: string
   paidOther: string
   paidLateFee: string
+  waivedInterest: string
+  waivedOther: string
   paidAmount: string
   balanceDue: string
   status: InstallmentStatus
@@ -175,6 +177,7 @@ export interface Payment {
   operationId: string | null
   paymentCategory: PaymentCategory
   applicationMode: PaymentApplicationMode
+  chargeFutureInterest: boolean
   applicationOrder: PaymentComponent[] | null
   amount: string
   currencyCode: string
@@ -208,8 +211,28 @@ export interface PaymentAllocation {
   allocatedInterest: string
   allocatedLateFee: string
   allocatedOther: string
+  waivedInterest: string
+  waivedOther: string
   allocatedAmount: string
   createdAt: Date
+}
+
+export interface PaymentAllocationDetail extends PaymentAllocation {
+  installmentNumber: number
+  installmentDueDate: string
+}
+
+export interface PaymentEventDetail {
+  id: string
+  eventType: string
+  description: string
+  performedByName: string | null
+  performedAt: Date
+}
+
+export interface PaymentDetail {
+  allocations: PaymentAllocationDetail[]
+  events: PaymentEventDetail[]
 }
 
 export type LateFeeScope = "global" | "project" | "operation"

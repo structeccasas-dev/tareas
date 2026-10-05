@@ -7,7 +7,8 @@ import { cobProjects, cobProperties } from "@/db/schema/collectionsProperty"
 import { cobOperations } from "@/db/schema/collectionsOperation"
 import { cobPaymentPlanVersions, cobPlanStages } from "@/db/schema/collectionsPlan"
 import { cobInstallments } from "@/db/schema/collectionsInstallment"
-import { cobPayments } from "@/db/schema/collectionsPayment"
+import { cobPayments, cobPaymentAllocations } from "@/db/schema/collectionsPayment"
+import { cobEvents } from "@/db/schema/collectionsEvent"
 import { cobCurrencies } from "@/db/schema/collectionsCurrency"
 import type {
   Client,
@@ -22,6 +23,8 @@ import type {
   OperationListItem,
   OperationsPage,
   OperationSummary,
+  PaymentAllocationDetail,
+  PaymentDetail,
   PaymentWithUsers,
   Project,
   Property,
@@ -425,4 +428,40 @@ export async function getDashboardSummary(opts: { search?: string; projectId?: s
 // dashboard completo en cada carga de página.
 export async function getOverdueOperationsCount(): Promise<number> {
   return db.$count(cobOperations, and(eq(cobOperations.status, "active"), gte(cobOperations.overdueAmount, "0.01")))
+}
+
+// Detalle de un pago: cómo se repartió entre cuotas y qué le pasó (alta,
+// ediciones, anulación). Se carga bajo demanda al abrir el detalle en vez de
+// traerlo para todos los pagos de la operación.
+export async function getPaymentDetail(paymentId: string): Promise<PaymentDetail> {
+  const allocationRows = await db
+    .select({
+      allocation: cobPaymentAllocations,
+      installmentNumber: cobInstallments.installmentNumber,
+      installmentDueDate: cobInstallments.dueDate,
+    })
+    .from(cobPaymentAllocations)
+    .innerJoin(cobInstallments, eq(cobPaymentAllocations.installmentId, cobInstallments.id))
+    .where(eq(cobPaymentAllocations.paymentId, paymentId))
+    .orderBy(asc(cobInstallments.installmentNumber))
+
+  const eventRows = await db
+    .select({
+      id: cobEvents.id,
+      eventType: cobEvents.eventType,
+      description: cobEvents.description,
+      performedAt: cobEvents.performedAt,
+      performedByName: users.name,
+    })
+    .from(cobEvents)
+    .leftJoin(users, eq(cobEvents.performedBy, users.id))
+    .where(and(eq(cobEvents.entityType, "payment"), eq(cobEvents.entityId, paymentId)))
+    .orderBy(asc(cobEvents.performedAt))
+
+  return {
+    allocations: allocationRows.map(
+      (r) => ({ ...r.allocation, installmentNumber: r.installmentNumber, installmentDueDate: r.installmentDueDate }) as PaymentAllocationDetail,
+    ),
+    events: eventRows,
+  }
 }

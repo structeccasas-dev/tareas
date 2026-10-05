@@ -4,12 +4,18 @@ import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { differenceInCalendarDays, parseISO } from "date-fns"
-import { ArrowLeft, DollarSign, Ban, Trash2, Repeat, XCircle, AlertTriangle, Pencil, Building2 } from "lucide-react"
+import { ArrowLeft, DollarSign, Ban, Trash2, Repeat, XCircle, AlertTriangle, Pencil, Building2, Eye } from "lucide-react"
 import { PageHeader } from "@/components/PageHeader"
 import { Card } from "@/components/Card"
 import { Button } from "@/components/Button"
 import { Input } from "@/components/Input"
 import { Select } from "@/components/Select"
+import { compressImage } from "@/lib/clientImage"
+import { PaymentDetailDialog, PAYMENT_METHOD_LABEL } from "./PaymentDetailDialog"
+
+// Mismo tope que RECEIPT_MAX_BYTES en src/lib/receiptStorage.ts (server-only,
+// no se puede importar desde un componente cliente).
+const RECEIPT_MAX_BYTES = 1024 * 1024
 import { Textarea } from "@/components/Textarea"
 import { Dialog } from "@/components/Dialog"
 import { StatTile } from "@/components/StatTile"
@@ -19,6 +25,7 @@ import { InstallmentStatusBadge } from "./InstallmentStatusBadge"
 import { PropertyFieldsCard } from "./PropertyFieldsCard"
 import {
   registerPayment,
+  updatePayment,
   reversePayment,
   cancelOperation,
   deleteOperation,
@@ -29,7 +36,7 @@ import { findEmptyStages, generatePlanSchedule } from "@/modules/collections/eng
 import { clientDisplayName, convertCurrency, exchangeRateLabel, formatMoney, formatOperationNumber, preciseInstallmentTotal } from "@/modules/collections/format"
 import { StageBuilderCard, newStage, toStageScheduleInput, type StageForm } from "./StageBuilder"
 import { DEFAULT_APPLICATION_ORDER } from "@/types/collections"
-import type { Currency, OperationDetail, PaymentComponent, PaymentMethod, PlanVersionReason, Project, PropertyType } from "@/types/collections"
+import type { Currency, OperationDetail, PaymentComponent, PaymentMethod, PaymentWithUsers, PlanVersionReason, Project, PropertyType } from "@/types/collections"
 
 const REPLAN_REASON_LABEL: Record<Exclude<PlanVersionReason, "initial">, string> = {
   prepayment_recalculation: "Recálculo por pago adelantado",
@@ -53,15 +60,6 @@ const STAGE_TYPE_LABEL: Record<string, string> = {
   fixed_installment: "Cuotas fijas",
   french: "Sistema francés",
   custom: "Personalizada",
-}
-
-const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
-  bank_transfer: "Transferencia bancaria",
-  deposit: "Depósito",
-  cash: "Efectivo",
-  card: "Tarjeta",
-  check: "Cheque",
-  other: "Otro",
 }
 
 const COMPONENT_LABEL: Record<PaymentComponent, string> = {
@@ -89,6 +87,13 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
   const [bankName, setBankName] = useState("")
   const [observations, setObservations] = useState("")
   const [order, setOrder] = useState<PaymentComponent[]>(DEFAULT_APPLICATION_ORDER)
+  const [chargeFutureInterest, setChargeFutureInterest] = useState(false)
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [detailPayment, setDetailPayment] = useState<PaymentWithUsers | null>(null)
+  // Si no es null, el diálogo de pago edita ese pago en vez de registrar uno nuevo.
+  const [editingPayment, setEditingPayment] = useState<PaymentWithUsers | null>(null)
 
   const [lateFeeEnabled, setLateFeeEnabled] = useState(false)
   const [lateFeeInstallmentId, setLateFeeInstallmentId] = useState("")
@@ -290,7 +295,47 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
     })
   }
 
+  async function handleReceiptChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target
+    const file = input.files?.[0]
+    setReceiptFile(null)
+    setReceiptPreview(null)
+    if (!file) return
+    if (!file.type.startsWith("image/")) {
+      setError("El comprobante tiene que ser una imagen")
+      input.value = ""
+      return
+    }
+    setError(null)
+    setIsCompressing(true)
+    // Se comprime apenas se elige, así se ve el peso final y el submit no espera.
+    const compressed = await compressImage(file, { maxDimension: 1600, quality: 0.75, maxBytes: RECEIPT_MAX_BYTES })
+    setReceiptFile(compressed)
+    setReceiptPreview(URL.createObjectURL(compressed))
+    setIsCompressing(false)
+  }
+
+  function openEditDialog(p: PaymentWithUsers) {
+    openDialog()
+    setEditingPayment(p)
+    setAmount(p.amount)
+    setChargeFutureInterest(p.chargeFutureInterest)
+    setPaymentCurrencyCode(p.currencyCode)
+    setExchangeRate(p.exchangeRate ?? "")
+    setPaymentMethod(p.paymentMethod)
+    setPaymentDate(p.paymentDate)
+    setReferenceNumber(p.referenceNumber ?? "")
+    setBankName(p.bankName ?? "")
+    setObservations(p.observations ?? "")
+    setOrder(p.applicationOrder ?? DEFAULT_APPLICATION_ORDER)
+    setDetailPayment(null)
+  }
+
   function openDialog() {
+    setEditingPayment(null)
+    setReceiptFile(null)
+    setReceiptPreview(null)
+    setChargeFutureInterest(false)
     setAmount("")
     setPaymentCurrencyCode(operation.currencyCode)
     setExchangeRate("")
@@ -311,10 +356,15 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!receiptFile && !editingPayment?.receiptUrl) {
+      setError("Adjuntá la imagen del comprobante de pago")
+      return
+    }
+    const formData = new FormData()
+    if (receiptFile) formData.set("receipt", receiptFile)
     startTransition(async () => {
       try {
-        await registerPayment({
-          operationId: operation.id,
+        const base = {
           amount: Number(amount),
           currencyCode: isForeignPaymentCurrency ? paymentCurrencyCode : undefined,
           exchangeRate: isForeignPaymentCurrency ? Number(exchangeRate) : undefined,
@@ -324,15 +374,27 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
           bankName,
           observations,
           applicationOrder: order,
-          lateFeeCharge:
-            lateFeeEnabled && lateFeeInstallment && lateFeeAmountComputed != null
-              ? { installmentId: lateFeeInstallment.id, amount: lateFeeAmountComputed }
-              : undefined,
-        })
+          chargeFutureInterest,
+        }
+        if (editingPayment) {
+          await updatePayment({ ...base, paymentId: editingPayment.id }, formData)
+        } else {
+          await registerPayment(
+            {
+              ...base,
+              operationId: operation.id,
+              lateFeeCharge:
+                lateFeeEnabled && lateFeeInstallment && lateFeeAmountComputed != null
+                  ? { installmentId: lateFeeInstallment.id, amount: lateFeeAmountComputed }
+                  : undefined,
+            },
+            formData,
+          )
+        }
         setDialogOpen(false)
         router.refresh()
       } catch (err) {
-        setError(err instanceof Error ? err.message : "No se pudo registrar el pago")
+        setError(err instanceof Error ? err.message : editingPayment ? "No se pudo editar el pago" : "No se pudo registrar el pago")
       }
     })
   }
@@ -499,7 +561,12 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
                     <td className="px-3 py-2.5 text-gray-500">{inst.installmentNumber}</td>
                     <td className="px-3 py-2.5 text-gray-700">{inst.dueDate}</td>
                     <td className="px-3 py-2.5 text-right text-gray-600 hidden sm:table-cell">{formatMoney(inst.principalAmount, operation.currencyCode)}</td>
-                    <td className="px-3 py-2.5 text-right text-gray-600 hidden sm:table-cell">{formatMoney(inst.interestAmount, operation.currencyCode)}</td>
+                    <td className="px-3 py-2.5 text-right text-gray-600 hidden sm:table-cell">
+                      {formatMoney(inst.interestAmount, operation.currencyCode)}
+                      {Number(inst.waivedInterest) > 0 && (
+                        <span className="block text-[11px] text-amber-700">no cobrado: {formatMoney(inst.waivedInterest, operation.currencyCode)}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2.5 text-right text-gray-600 hidden md:table-cell">{formatMoney(inst.lateFeeAmount, operation.currencyCode)}</td>
                     <td className="px-3 py-2.5 text-right font-medium text-gray-900">{formatMoney(inst.totalAmount, operation.currencyCode)}</td>
                     {operation.referenceCurrencyCode && (
@@ -583,6 +650,14 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-right">
+                        <button
+                          type="button"
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-xs text-primary-dark transition-colors duration-150 hover:bg-surface-alt"
+                          onClick={() => setDetailPayment(p)}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver
+                        </button>
                         {p.status === "confirmed" && (
                           <button
                             type="button"
@@ -607,7 +682,23 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
         </Card>
       </div>
 
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title="Registrar pago" size="lg">
+      {detailPayment && (
+        <PaymentDetailDialog
+          key={detailPayment.id}
+          payment={detailPayment}
+          operationCurrencyCode={operation.currencyCode}
+          onClose={() => setDetailPayment(null)}
+          onEdit={() => openEditDialog(detailPayment)}
+          onReverse={() => {
+            setReverseReason("")
+            setReverseError(null)
+            setReverseTarget(detailPayment.id)
+            setDetailPayment(null)
+          }}
+        />
+      )}
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} title={editingPayment ? "Editar pago" : "Registrar pago"} size="lg">
         <form onSubmit={handleSubmit} className="mx-auto max-w-2xl space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Monto">
@@ -653,7 +744,32 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
             <Input type="date" required value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
           </Field>
 
-          {overdueInstallments.length > 0 && (
+          <label className="flex items-start gap-2 rounded-xl bg-surface-alt/60 p-3 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={chargeFutureInterest}
+              onChange={(e) => setChargeFutureInterest(e.target.checked)}
+            />
+            <span>
+              Cobrar interés de cuotas que todavía no vencen
+              <span className="block text-xs text-gray-500">
+                Desmarcado (por defecto), un pago adelantado solo cubre capital en las cuotas futuras y su interés se
+                condona cuando el capital queda saldado. Marcado, se cobra el interés y los cargos completos de cada
+                cuota alcanzada, aunque no haya vencido.
+              </span>
+            </span>
+          </label>
+
+          {editingPayment && (
+            <p className="rounded-xl bg-surface-alt/60 p-3 text-xs text-gray-600">
+              Corregir referencia, banco, observaciones, método o comprobante se guarda directo. Si cambiás monto, fecha,
+              moneda u orden de aplicación, el pago original se anula y se registra uno nuevo con los datos corregidos
+              (el original queda en el historial).
+            </p>
+          )}
+
+          {!editingPayment && overdueInstallments.length > 0 && (
             <Card className="p-3 border-amber-200/70 space-y-3">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -726,6 +842,28 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
               <Input value={bankName} onChange={(e) => setBankName(e.target.value)} />
             </Field>
           </div>
+          <Field label="Comprobante (imagen)">
+            <input
+              type="file"
+              accept="image/*"
+              required={!editingPayment?.receiptUrl}
+              onChange={handleReceiptChange}
+              className="w-full text-sm text-gray-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-surface-alt file:text-gray-700 file:text-xs"
+            />
+            {editingPayment?.receiptUrl && !receiptFile && !isCompressing && (
+              <p className="mt-1 text-xs text-gray-500">
+                Ya tiene un comprobante adjunto. Elegí otra imagen solo si querés reemplazarlo.
+              </p>
+            )}
+            {isCompressing && <p className="mt-1 text-xs text-gray-500">Optimizando imagen...</p>}
+            {receiptFile && receiptPreview && !isCompressing && (
+              <div className="mt-2 flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={receiptPreview} alt="Vista previa del comprobante" className="h-16 w-16 rounded-lg border border-border object-cover" />
+                <p className="text-xs text-gray-500">Se subirá optimizada ({Math.max(1, Math.round(receiptFile.size / 1024))} KB).</p>
+              </div>
+            )}
+          </Field>
           <Field label="Observaciones">
             <Textarea rows={2} value={observations} onChange={(e) => setObservations(e.target.value)} />
           </Field>
@@ -776,8 +914,8 @@ export function OperationDetailShell({ detail, currencies, projects }: { detail:
             <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)} disabled={isPending}>
               Cancelar
             </Button>
-            <Button type="submit" isLoading={isPending}>
-              Registrar
+            <Button type="submit" isLoading={isPending} disabled={isCompressing}>
+              {editingPayment ? "Guardar" : "Registrar"}
             </Button>
           </div>
         </form>

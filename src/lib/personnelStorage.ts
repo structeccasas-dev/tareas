@@ -25,7 +25,7 @@ const IMAGE_QUALITY = 80
 // VERCEL_ENV solo viene seteada en Vercel ("production" | "preview" |
 // "development"); localmente no existe, así que cualquier caso que no sea
 // producción cae en "dev".
-function getEnvPrefix(): "dev" | "production" {
+export function getEnvPrefix(): "dev" | "production" {
   return process.env.VERCEL_ENV === "production" ? "production" : "dev"
 }
 

@@ -6,42 +6,11 @@ import { submitOnboarding } from "@/modules/personnel/actions/personnelActions"
 import { Card } from "@/components/Card"
 import { Input } from "@/components/Input"
 import { Button } from "@/components/Button"
+import { compressImage } from "@/lib/clientImage"
 
 interface OnboardingFormProps {
   token: string
   personnelName: string
-}
-
-const IMAGE_MAX_DIMENSION = 1600
-const IMAGE_QUALITY = 0.8
-
-// Vercel corta el request de un Server Action en ~4.5MB a nivel de
-// plataforma, antes de que llegue a nuestro código — el bodySizeLimit de
-// next.config.ts no puede overridear eso. Dos fotos de cédula sacadas con
-// celular (3-8MB cada una) superan ese límite fácil, y el error que da
-// Next.js del lado del cliente cuando pasa esto ("An unexpected response
-// was received from the server") no dice nada de tamaño. Comprimimos acá
-// antes de armar el FormData para no acercarnos nunca al límite.
-async function compressImage(file: File): Promise<File> {
-  try {
-    const bitmap = await createImageBitmap(file)
-    const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.round(bitmap.width * scale)
-    canvas.height = Math.round(bitmap.height * scale)
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return file
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    bitmap.close()
-
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", IMAGE_QUALITY))
-    if (!blob) return file
-    return new File([blob], file.name.replace(/\.[^./]+$/, "") + ".jpg", { type: "image/jpeg" })
-  } catch {
-    // Si el navegador no puede decodificar el formato (algunos HEIC en
-    // Android, por ejemplo), mandamos el original y que lo valide el server.
-    return file
-  }
 }
 
 export function OnboardingForm({ token, personnelName }: OnboardingFormProps) {

@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, numeric, date, timestamp, jsonb, index } from "drizzle-orm/pg-core"
+import { pgTable, uuid, varchar, text, numeric, date, timestamp, jsonb, boolean, index } from "drizzle-orm/pg-core"
 import { users } from "./user"
 import { cobClients } from "./collectionsClient"
 import { cobOperations } from "./collectionsOperation"
@@ -27,6 +27,11 @@ export const cobPayments = pgTable(
 
     // Cómo el usuario eligió distribuir este pago entre los componentes de
     // cada cuota (§10/§20 del diseño) — nunca es un orden fijo del sistema.
+    // Si el pago cobró interés/cargos de cuotas que todavía no vencían a la
+    // fecha del pago (pago adelantado). Si es false, esas cuotas solo reciben
+    // capital y el interés se condona cuando el capital queda saldado.
+    chargeFutureInterest: boolean().notNull().default(false),
+
     applicationMode: varchar({ length: 20 }).$type<"auto_order" | "manual">().notNull().default("auto_order"),
     // Sólo si applicationMode = 'auto_order'. Ej: ["late_fee","interest","other_charges","principal"].
     applicationOrder: jsonb().$type<Array<"late_fee" | "interest" | "other_charges" | "principal">>(),
@@ -88,6 +93,10 @@ export const cobPaymentAllocations = pgTable(
     allocatedInterest: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     allocatedLateFee: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     allocatedOther: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
+    // Interés/cargos de esta cuota que este pago dejó sin cobrar por ser un
+    // adelanto (ver waivedInterest en cobInstallments).
+    waivedInterest: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
+    waivedOther: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     allocatedAmount: numeric({ precision: 14, scale: 2 }).notNull(),
 
     createdAt: timestamp().defaultNow().notNull(),

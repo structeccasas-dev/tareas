@@ -10,11 +10,13 @@ import { cobPaymentPlanVersions, cobPlanStages } from "@/db/schema/collectionsPl
 import { cobInstallments } from "@/db/schema/collectionsInstallment"
 import { cobPayments, cobPaymentAllocations } from "@/db/schema/collectionsPayment"
 import { getSession } from "@/lib/session"
+import { saveReceipt, deleteReceipt } from "@/lib/receiptStorage"
 import { canManageCollections } from "@/lib/permissions"
 import { generatePlanSchedule } from "@/modules/collections/engine/schedule"
 import { allocatePayment, type AllocationTarget } from "@/modules/collections/engine/paymentAllocation"
 import { calculateSettlementQuote } from "@/modules/collections/engine/settlement"
 import type { StageScheduleInput } from "@/modules/collections/engine/types"
+import { getPaymentDetail } from "@/modules/collections/data/queries"
 import { logCollectionsEvent } from "@/modules/collections/data/events"
 import { convertCurrency } from "@/modules/collections/format"
 import { DEFAULT_APPLICATION_ORDER } from "@/types/collections"
@@ -34,6 +36,8 @@ import type {
   RateType,
   StageType,
 } from "@/types/collections"
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 async function requireManage() {
   const session = await getSession()
@@ -454,6 +458,9 @@ interface RegisterPaymentInput {
   currencyCode?: string
   exchangeRate?: number
   applicationOrder?: PaymentComponent[]
+  // Cobrar también el interés/cargos de cuotas que todavía no vencen a la
+  // fecha del pago. Por defecto no (pago adelantado = solo capital).
+  chargeFutureInterest?: boolean
   referenceNumber?: string
   bankName?: string
   observations?: string
@@ -468,192 +475,216 @@ interface RegisterPaymentInput {
   }
 }
 
-export async function registerPayment(data: RegisterPaymentInput): Promise<{ id: string }> {
+// El comprobante (imagen) viaja en un FormData aparte del resto de los datos,
+// bajo la clave "receipt", porque un File no se puede mandar dentro de un
+// objeto plano. Es obligatorio: cada pago tiene que quedar respaldado.
+export async function registerPayment(data: RegisterPaymentInput, formData: FormData): Promise<{ id: string }> {
   const session = await requireManage()
   if (data.amount <= 0) throw new Error("El monto del pago debe ser mayor a cero")
 
-  const paymentId = await db.transaction(async (tx) => {
-    const [operation] = await tx.select().from(cobOperations).where(eq(cobOperations.id, data.operationId)).limit(1)
-    if (!operation) throw new Error("Operación no encontrada")
+  const receipt = formData.get("receipt")
+  if (!(receipt instanceof File) || receipt.size === 0) {
+    throw new Error("Adjuntá la imagen del comprobante de pago")
+  }
+  // Se sube antes de la transacción (no se puede hacer rollback de un blob);
+  // si el pago falla por cualquier motivo, se borra para no dejarlo huérfano.
+  const receiptUrl = await saveReceipt(receipt)
 
-    const currencyCode = data.currencyCode || operation.currencyCode
-    const exchangeRate = currencyCode !== operation.currencyCode ? data.exchangeRate : null
-    if (currencyCode !== operation.currencyCode && !exchangeRate) {
-      throw new Error("Se requiere el tipo de cambio cuando el pago es en una moneda distinta a la de la operación")
-    }
-    // exchangeRateLabel/convertCurrency deciden la dirección (dividir o
-    // multiplicar) según cuál de las dos monedas es USD, para que el tipo de
-    // cambio que carga el usuario sea siempre el que se cotiza de memoria
-    // (ver src/modules/collections/format.ts).
-    const convertedAmount = exchangeRate ? convertCurrency(data.amount, exchangeRate, currencyCode, operation.currencyCode) : data.amount
+  let paymentId: string
+  try {
+    paymentId = await db.transaction((tx) => applyPayment(tx, data, receiptUrl, session.userId))
+  } catch (err) {
+    await deleteReceipt(receiptUrl).catch(() => {})
+    throw err
+  }
 
-    const [activeVersion] = await tx
-      .select()
-      .from(cobPaymentPlanVersions)
-      .where(and(eq(cobPaymentPlanVersions.operationId, data.operationId), eq(cobPaymentPlanVersions.status, "active")))
-      .limit(1)
-    if (!activeVersion) throw new Error("La operación no tiene un plan de pagos activo")
+  refresh()
+  return { id: paymentId }
+}
 
-    if (data.lateFeeCharge) {
-      if (data.lateFeeCharge.amount <= 0) throw new Error("El monto de mora debe ser mayor a cero")
+async function applyPayment(tx: Tx, data: RegisterPaymentInput, receiptUrl: string, userId: string): Promise<string> {
+  const [operation] = await tx.select().from(cobOperations).where(eq(cobOperations.id, data.operationId)).limit(1)
+  if (!operation) throw new Error("Operación no encontrada")
 
-      const [chargedInstallment] = await tx
-        .select()
-        .from(cobInstallments)
-        .where(and(eq(cobInstallments.id, data.lateFeeCharge.installmentId), eq(cobInstallments.planVersionId, activeVersion.id)))
-        .limit(1)
-      if (!chargedInstallment) throw new Error("La cuota indicada para la mora no pertenece a esta operación")
+  const currencyCode = data.currencyCode || operation.currencyCode
+  const exchangeRate = currencyCode !== operation.currencyCode ? data.exchangeRate : null
+  if (currencyCode !== operation.currencyCode && !exchangeRate) {
+    throw new Error("Se requiere el tipo de cambio cuando el pago es en una moneda distinta a la de la operación")
+  }
+  // exchangeRateLabel/convertCurrency deciden la dirección (dividir o
+  // multiplicar) según cuál de las dos monedas es USD, para que el tipo de
+  // cambio que carga el usuario sea siempre el que se cotiza de memoria
+  // (ver src/modules/collections/format.ts).
+  const convertedAmount = exchangeRate ? convertCurrency(data.amount, exchangeRate, currencyCode, operation.currencyCode) : data.amount
 
-      const newLateFeeAmount = roundToCents(Number(chargedInstallment.lateFeeAmount) + data.lateFeeCharge.amount)
-      const newBalanceDue = roundToCents(Number(chargedInstallment.balanceDue) + data.lateFeeCharge.amount)
-      await tx
-        .update(cobInstallments)
-        .set({ lateFeeAmount: String(newLateFeeAmount), balanceDue: String(newBalanceDue), updatedAt: new Date() })
-        .where(eq(cobInstallments.id, chargedInstallment.id))
+  const [activeVersion] = await tx
+    .select()
+    .from(cobPaymentPlanVersions)
+    .where(and(eq(cobPaymentPlanVersions.operationId, data.operationId), eq(cobPaymentPlanVersions.status, "active")))
+    .limit(1)
+  if (!activeVersion) throw new Error("La operación no tiene un plan de pagos activo")
 
-      await logCollectionsEvent(tx, {
-        operationId: operation.id,
-        entityType: "installment",
-        entityId: chargedInstallment.id,
-        eventType: "late_fee_charged",
-        description: `Se cargó mora de ${data.lateFeeCharge.amount} ${operation.currencyCode} a la cuota #${chargedInstallment.installmentNumber} por atraso`,
-        performedBy: session.userId,
-      })
-    }
+  if (data.lateFeeCharge) {
+    if (data.lateFeeCharge.amount <= 0) throw new Error("El monto de mora debe ser mayor a cero")
 
-    const pendingInstallments = await tx
+    const [chargedInstallment] = await tx
       .select()
       .from(cobInstallments)
-      .where(and(eq(cobInstallments.planVersionId, activeVersion.id), inArray(cobInstallments.status, ["pending", "partial"])))
+      .where(and(eq(cobInstallments.id, data.lateFeeCharge.installmentId), eq(cobInstallments.planVersionId, activeVersion.id)))
+      .limit(1)
+    if (!chargedInstallment) throw new Error("La cuota indicada para la mora no pertenece a esta operación")
 
-    // El interés y los cargos de una cuota que todavía no vence no se le
-    // pueden cobrar a alguien que paga por adelantado — mismo criterio que ya
-    // usa calculateSettlementQuote para la liquidación anticipada (§22 del
-    // diseño, ver engine/settlement.ts). En una cuota vencida sí corresponde
-    // cobrar todo lo pendiente, sea cual sea el orden que eligió el usuario.
-    const targets: AllocationTarget[] = pendingInstallments.map((inst) => {
-      const isDue = inst.dueDate <= data.paymentDate
-      return {
-        installmentId: inst.id,
-        dueDate: inst.dueDate,
-        lateFeeDue: Number(inst.lateFeeAmount) - Number(inst.paidLateFee),
-        interestDue: isDue ? Number(inst.interestAmount) - Number(inst.paidInterest) : 0,
-        otherDue: isDue ? Number(inst.otherChargesAmount) - Number(inst.paidOther) : 0,
-        principalDue: Number(inst.principalAmount) - Number(inst.paidPrincipal),
-      }
+    const newLateFeeAmount = roundToCents(Number(chargedInstallment.lateFeeAmount) + data.lateFeeCharge.amount)
+    const newBalanceDue = roundToCents(Number(chargedInstallment.balanceDue) + data.lateFeeCharge.amount)
+    await tx
+      .update(cobInstallments)
+      .set({ lateFeeAmount: String(newLateFeeAmount), balanceDue: String(newBalanceDue), updatedAt: new Date() })
+      .where(eq(cobInstallments.id, chargedInstallment.id))
+
+    await logCollectionsEvent(tx, {
+      operationId: operation.id,
+      entityType: "installment",
+      entityId: chargedInstallment.id,
+      eventType: "late_fee_charged",
+      description: `Se cargó mora de ${data.lateFeeCharge.amount} ${operation.currencyCode} a la cuota #${chargedInstallment.installmentNumber} por atraso`,
+      performedBy: userId,
     })
+  }
 
-    const order = data.applicationOrder ?? DEFAULT_APPLICATION_ORDER
-    const { allocations, unallocated } = allocatePayment(convertedAmount, targets, order)
+  const pendingInstallments = await tx
+    .select()
+    .from(cobInstallments)
+    .where(and(eq(cobInstallments.planVersionId, activeVersion.id), inArray(cobInstallments.status, ["pending", "partial"])))
 
-    const [payment] = await tx
-      .insert(cobPayments)
-      .values({
-        clientId: operation.clientId,
-        operationId: operation.id,
-        paymentCategory: data.paymentCategory ?? "regular",
-        applicationMode: "auto_order",
-        applicationOrder: order,
-        amount: String(data.amount),
-        currencyCode,
-        exchangeRate: exchangeRate != null ? String(exchangeRate) : null,
-        convertedAmount: exchangeRate != null ? String(convertedAmount) : null,
-        paymentMethod: data.paymentMethod,
-        paymentDate: data.paymentDate,
-        referenceNumber: data.referenceNumber?.trim() || null,
-        bankName: data.bankName?.trim() || null,
-        observations: data.observations?.trim() || null,
-        registeredBy: session.userId,
-      })
-      .returning({ id: cobPayments.id })
+  // El interés y los cargos de una cuota que todavía no vence no se le
+  // pueden cobrar a alguien que paga por adelantado — mismo criterio que ya
+  // usa calculateSettlementQuote para la liquidación anticipada (§22 del
+  // diseño, ver engine/settlement.ts). En una cuota vencida sí corresponde
+  // cobrar todo lo pendiente, sea cual sea el orden que eligió el usuario.
+  const targets: AllocationTarget[] = pendingInstallments.map((inst) => {
+    const isDue = data.chargeFutureInterest === true || inst.dueDate <= data.paymentDate
+    return {
+      installmentId: inst.id,
+      dueDate: inst.dueDate,
+      lateFeeDue: Number(inst.lateFeeAmount) - Number(inst.paidLateFee),
+      interestDue: isDue ? Number(inst.interestAmount) - Number(inst.paidInterest) - Number(inst.waivedInterest) : 0,
+      otherDue: isDue ? Number(inst.otherChargesAmount) - Number(inst.paidOther) - Number(inst.waivedOther) : 0,
+      principalDue: Number(inst.principalAmount) - Number(inst.paidPrincipal),
+    }
+  })
 
-    let totalWaived = 0
+  const order = data.applicationOrder ?? DEFAULT_APPLICATION_ORDER
+  const { allocations, unallocated } = allocatePayment(convertedAmount, targets, order)
 
-    for (const allocation of allocations) {
-      await tx.insert(cobPaymentAllocations).values({
-        paymentId: payment.id,
-        installmentId: allocation.installmentId,
-        allocatedPrincipal: String(allocation.appliedPrincipal),
-        allocatedInterest: String(allocation.appliedInterest),
-        allocatedLateFee: String(allocation.appliedLateFee),
-        allocatedOther: String(allocation.appliedOther),
-        allocatedAmount: String(allocation.appliedTotal),
-      })
+  const [payment] = await tx
+    .insert(cobPayments)
+    .values({
+      clientId: operation.clientId,
+      operationId: operation.id,
+      paymentCategory: data.paymentCategory ?? "regular",
+      applicationMode: "auto_order",
+      applicationOrder: order,
+      amount: String(data.amount),
+      currencyCode,
+      exchangeRate: exchangeRate != null ? String(exchangeRate) : null,
+      convertedAmount: exchangeRate != null ? String(convertedAmount) : null,
+      paymentMethod: data.paymentMethod,
+      paymentDate: data.paymentDate,
+      referenceNumber: data.referenceNumber?.trim() || null,
+      bankName: data.bankName?.trim() || null,
+      receiptUrl,
+      observations: data.observations?.trim() || null,
+      registeredBy: userId,
+    })
+    .returning({ id: cobPayments.id })
 
-      const inst = pendingInstallments.find((i) => i.id === allocation.installmentId)!
-      const isDue = inst.dueDate <= data.paymentDate
-      const paidPrincipal = roundToCents(Number(inst.paidPrincipal) + allocation.appliedPrincipal)
-      const paidInterest = roundToCents(Number(inst.paidInterest) + allocation.appliedInterest)
-      const paidOther = roundToCents(Number(inst.paidOther) + allocation.appliedOther)
-      const paidLateFee = roundToCents(Number(inst.paidLateFee) + allocation.appliedLateFee)
+  let totalWaived = 0
 
-      let interestAmount = Number(inst.interestAmount)
-      let otherChargesAmount = Number(inst.otherChargesAmount)
+  for (const allocation of allocations) {
+    const inst = pendingInstallments.find((i) => i.id === allocation.installmentId)!
+    const isDue = data.chargeFutureInterest === true || inst.dueDate <= data.paymentDate
+    const paidPrincipal = roundToCents(Number(inst.paidPrincipal) + allocation.appliedPrincipal)
+    const paidInterest = roundToCents(Number(inst.paidInterest) + allocation.appliedInterest)
+    const paidOther = roundToCents(Number(inst.paidOther) + allocation.appliedOther)
+    const paidLateFee = roundToCents(Number(inst.paidLateFee) + allocation.appliedLateFee)
 
-      // Si la cuota todavía no vencía y este pago le adelantó todo el
-      // capital, el interés (y otros cargos) de ese período nunca llega a
-      // devengarse — se condona en vez de quedar como saldo fantasma que
-      // nadie debería terminar pagando.
-      if (!isDue && paidPrincipal >= Number(inst.principalAmount) - 0.005) {
-        totalWaived += roundToCents(interestAmount - paidInterest + (otherChargesAmount - paidOther))
-        interestAmount = paidInterest
-        otherChargesAmount = paidOther
-      }
-
-      const paidAmount = roundToCents(paidPrincipal + paidInterest + paidOther + paidLateFee)
-      const totalAmount = roundToCents(Number(inst.principalAmount) + interestAmount + otherChargesAmount)
-      const balanceDue = roundToCents(totalAmount + Number(inst.lateFeeAmount) - paidAmount)
-
-      await tx
-        .update(cobInstallments)
-        .set({
-          paidPrincipal: String(paidPrincipal),
-          paidInterest: String(paidInterest),
-          paidOther: String(paidOther),
-          paidLateFee: String(paidLateFee),
-          paidAmount: String(paidAmount),
-          interestAmount: String(interestAmount),
-          otherChargesAmount: String(otherChargesAmount),
-          totalAmount: String(totalAmount),
-          balanceDue: String(Math.max(0, balanceDue)),
-          status: balanceDue <= 0 ? "paid" : paidAmount > 0 ? "partial" : "pending",
-          updatedAt: new Date(),
-        })
-        .where(eq(cobInstallments.id, allocation.installmentId))
+    // Si la cuota todavía no vencía y este pago le adelantó todo el capital,
+    // el interés (y otros cargos) de ese período no se cobra. El plan no se
+    // modifica: interestAmount/totalAmount quedan como estaban y lo no
+    // cobrado se registra aparte (waived*), tanto en la cuota como en la
+    // aplicación de este pago, para mostrarlo y poder revertirlo al anular.
+    let waivedInterest = 0
+    let waivedOther = 0
+    if (!isDue && paidPrincipal >= Number(inst.principalAmount) - 0.005) {
+      waivedInterest = Math.max(0, roundToCents(Number(inst.interestAmount) - paidInterest - Number(inst.waivedInterest)))
+      waivedOther = Math.max(0, roundToCents(Number(inst.otherChargesAmount) - paidOther - Number(inst.waivedOther)))
+      totalWaived += roundToCents(waivedInterest + waivedOther)
     }
 
-    const balanceBefore = Number(operation.currentBalance)
-    await recalcOperationCache(tx, operation.id)
-    const [updatedOperation] = await tx.select().from(cobOperations).where(eq(cobOperations.id, operation.id)).limit(1)
+    await tx.insert(cobPaymentAllocations).values({
+      paymentId: payment.id,
+      installmentId: allocation.installmentId,
+      allocatedPrincipal: String(allocation.appliedPrincipal),
+      allocatedInterest: String(allocation.appliedInterest),
+      allocatedLateFee: String(allocation.appliedLateFee),
+      allocatedOther: String(allocation.appliedOther),
+      waivedInterest: String(waivedInterest),
+      waivedOther: String(waivedOther),
+      allocatedAmount: String(allocation.appliedTotal),
+    })
 
+    const installmentWaivedInterest = roundToCents(Number(inst.waivedInterest) + waivedInterest)
+    const installmentWaivedOther = roundToCents(Number(inst.waivedOther) + waivedOther)
+    const paidAmount = roundToCents(paidPrincipal + paidInterest + paidOther + paidLateFee)
+    const balanceDue = roundToCents(
+      Number(inst.totalAmount) + Number(inst.lateFeeAmount) - paidAmount - installmentWaivedInterest - installmentWaivedOther,
+    )
+
+    await tx
+      .update(cobInstallments)
+      .set({
+        paidPrincipal: String(paidPrincipal),
+        paidInterest: String(paidInterest),
+        paidOther: String(paidOther),
+        paidLateFee: String(paidLateFee),
+        paidAmount: String(paidAmount),
+        waivedInterest: String(installmentWaivedInterest),
+        waivedOther: String(installmentWaivedOther),
+        balanceDue: String(Math.max(0, balanceDue)),
+        status: balanceDue <= 0 ? "paid" : paidAmount > 0 ? "partial" : "pending",
+        updatedAt: new Date(),
+      })
+      .where(eq(cobInstallments.id, allocation.installmentId))
+  }
+
+  const balanceBefore = Number(operation.currentBalance)
+  await recalcOperationCache(tx, operation.id)
+  const [updatedOperation] = await tx.select().from(cobOperations).where(eq(cobOperations.id, operation.id)).limit(1)
+
+  await logCollectionsEvent(tx, {
+    operationId: operation.id,
+    entityType: "payment",
+    entityId: payment.id,
+    eventType: "payment_registered",
+    description: `Pago de ${data.amount} ${currencyCode} registrado${unallocated > 0 ? ` (${unallocated} sin aplicar, queda como saldo a favor)` : ""}`,
+    amountDelta: -convertedAmount,
+    balanceBefore,
+    balanceAfter: Number(updatedOperation.currentBalance),
+    performedBy: userId,
+  })
+
+  if (totalWaived > 0) {
     await logCollectionsEvent(tx, {
       operationId: operation.id,
       entityType: "payment",
       entityId: payment.id,
-      eventType: "payment_registered",
-      description: `Pago de ${data.amount} ${currencyCode} registrado${unallocated > 0 ? ` (${unallocated} sin aplicar, queda como saldo a favor)` : ""}`,
-      amountDelta: -convertedAmount,
-      balanceBefore,
-      balanceAfter: Number(updatedOperation.currentBalance),
-      performedBy: session.userId,
+      eventType: "future_interest_waived",
+      description: `No se cobraron ${roundToCents(totalWaived)} ${operation.currencyCode} de interés/cargos de cuotas futuras pagadas por adelantado`,
+      performedBy: userId,
     })
+  }
 
-    if (totalWaived > 0) {
-      await logCollectionsEvent(tx, {
-        operationId: operation.id,
-        entityType: "payment",
-        entityId: payment.id,
-        eventType: "future_interest_waived",
-        description: `Se condonaron ${roundToCents(totalWaived)} ${operation.currencyCode} de interés/cargos no devengados en cuotas futuras pagadas por adelantado`,
-        performedBy: session.userId,
-      })
-    }
-
-    return payment.id
-  })
-
-  refresh()
-  return { id: paymentId }
+  return payment.id
 }
 
 // Anulación de un pago: nunca se borra nada (mismo criterio que
@@ -672,84 +703,207 @@ export async function reversePayment(data: ReversePaymentInput): Promise<void> {
   const reason = data.reason.trim()
   if (!reason) throw new Error("Necesitás indicar un motivo para anular el pago")
 
-  await db.transaction(async (tx) => {
-    const [payment] = await tx.select().from(cobPayments).where(eq(cobPayments.id, data.paymentId)).limit(1)
-    if (!payment) throw new Error("Pago no encontrado")
-    if (payment.status !== "confirmed") throw new Error("Este pago ya fue anulado")
-    if (!payment.operationId) throw new Error("El pago no está asociado a una operación")
-
-    const allocations = await tx.select().from(cobPaymentAllocations).where(eq(cobPaymentAllocations.paymentId, payment.id))
-
-    for (const allocation of allocations) {
-      const [inst] = await tx.select().from(cobInstallments).where(eq(cobInstallments.id, allocation.installmentId)).limit(1)
-      if (!inst) continue
-
-      const paidPrincipal = roundToCents(Number(inst.paidPrincipal) - Number(allocation.allocatedPrincipal))
-      const paidInterest = roundToCents(Number(inst.paidInterest) - Number(allocation.allocatedInterest))
-      const paidOther = roundToCents(Number(inst.paidOther) - Number(allocation.allocatedOther))
-      const paidLateFee = roundToCents(Number(inst.paidLateFee) - Number(allocation.allocatedLateFee))
-      const paidAmount = roundToCents(paidPrincipal + paidInterest + paidOther + paidLateFee)
-      const balanceDue = roundToCents(Number(inst.totalAmount) + Number(inst.lateFeeAmount) - paidAmount)
-
-      // Una cuota cancelada/refinanciada no vuelve a "pending"/"partial" sólo
-      // porque se anuló un pago viejo — ese estado ya no depende de lo pagado
-      // (y recalcOperationCache las ignora igual, ver más abajo).
-      const status =
-        inst.status === "cancelled" || inst.status === "refinanced"
-          ? inst.status
-          : balanceDue <= 0
-            ? "paid"
-            : paidAmount > 0
-              ? "partial"
-              : "pending"
-
-      await tx
-        .update(cobInstallments)
-        .set({
-          paidPrincipal: String(Math.max(0, paidPrincipal)),
-          paidInterest: String(Math.max(0, paidInterest)),
-          paidOther: String(Math.max(0, paidOther)),
-          paidLateFee: String(Math.max(0, paidLateFee)),
-          paidAmount: String(Math.max(0, paidAmount)),
-          balanceDue: String(Math.max(0, balanceDue)),
-          status,
-          updatedAt: new Date(),
-        })
-        .where(eq(cobInstallments.id, allocation.installmentId))
-    }
-
-    await tx
-      .update(cobPayments)
-      .set({
-        status: "reversed",
-        reversalReason: reason,
-        reversedBy: session.userId,
-        reversedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(cobPayments.id, payment.id))
-
-    const [operationBefore] = await tx.select().from(cobOperations).where(eq(cobOperations.id, payment.operationId)).limit(1)
-    const balanceBefore = operationBefore ? Number(operationBefore.currentBalance) : 0
-
-    await recalcOperationCache(tx, payment.operationId)
-
-    const [operationAfter] = await tx.select().from(cobOperations).where(eq(cobOperations.id, payment.operationId)).limit(1)
-
-    await logCollectionsEvent(tx, {
-      operationId: payment.operationId,
-      entityType: "payment",
-      entityId: payment.id,
-      eventType: "payment_reversed",
-      description: `Pago de ${payment.amount} ${payment.currencyCode} anulado: ${reason}`,
-      amountDelta: Number(payment.convertedAmount ?? payment.amount),
-      balanceBefore,
-      balanceAfter: operationAfter ? Number(operationAfter.currentBalance) : balanceBefore,
-      performedBy: session.userId,
-    })
-  })
+  await db.transaction((tx) => reversePaymentInTx(tx, data.paymentId, reason, session.userId))
 
   refresh()
+}
+
+async function reversePaymentInTx(tx: Tx, paymentId: string, reason: string, userId: string): Promise<typeof cobPayments.$inferSelect> {
+  const [payment] = await tx.select().from(cobPayments).where(eq(cobPayments.id, paymentId)).limit(1)
+  if (!payment) throw new Error("Pago no encontrado")
+  if (payment.status !== "confirmed") throw new Error("Este pago ya fue anulado")
+  if (!payment.operationId) throw new Error("El pago no está asociado a una operación")
+
+  const allocations = await tx.select().from(cobPaymentAllocations).where(eq(cobPaymentAllocations.paymentId, payment.id))
+
+  for (const allocation of allocations) {
+    const [inst] = await tx.select().from(cobInstallments).where(eq(cobInstallments.id, allocation.installmentId)).limit(1)
+    if (!inst) continue
+
+    const paidPrincipal = roundToCents(Number(inst.paidPrincipal) - Number(allocation.allocatedPrincipal))
+    const paidInterest = roundToCents(Number(inst.paidInterest) - Number(allocation.allocatedInterest))
+    const paidOther = roundToCents(Number(inst.paidOther) - Number(allocation.allocatedOther))
+    const paidLateFee = roundToCents(Number(inst.paidLateFee) - Number(allocation.allocatedLateFee))
+    const paidAmount = roundToCents(paidPrincipal + paidInterest + paidOther + paidLateFee)
+    // Lo que este pago había dejado sin cobrar vuelve a ser deuda.
+    const waivedInterest = Math.max(0, roundToCents(Number(inst.waivedInterest) - Number(allocation.waivedInterest)))
+    const waivedOther = Math.max(0, roundToCents(Number(inst.waivedOther) - Number(allocation.waivedOther)))
+    const balanceDue = roundToCents(Number(inst.totalAmount) + Number(inst.lateFeeAmount) - paidAmount - waivedInterest - waivedOther)
+
+    // Una cuota cancelada/refinanciada no vuelve a "pending"/"partial" sólo
+    // porque se anuló un pago viejo — ese estado ya no depende de lo pagado
+    // (y recalcOperationCache las ignora igual, ver más abajo).
+    const status =
+      inst.status === "cancelled" || inst.status === "refinanced"
+        ? inst.status
+        : balanceDue <= 0
+          ? "paid"
+          : paidAmount > 0
+            ? "partial"
+            : "pending"
+
+    await tx
+      .update(cobInstallments)
+      .set({
+        paidPrincipal: String(Math.max(0, paidPrincipal)),
+        paidInterest: String(Math.max(0, paidInterest)),
+        paidOther: String(Math.max(0, paidOther)),
+        paidLateFee: String(Math.max(0, paidLateFee)),
+        paidAmount: String(Math.max(0, paidAmount)),
+        waivedInterest: String(waivedInterest),
+        waivedOther: String(waivedOther),
+        balanceDue: String(Math.max(0, balanceDue)),
+        status,
+        updatedAt: new Date(),
+      })
+      .where(eq(cobInstallments.id, allocation.installmentId))
+  }
+
+  await tx
+    .update(cobPayments)
+    .set({
+      status: "reversed",
+      reversalReason: reason,
+      reversedBy: userId,
+      reversedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(cobPayments.id, payment.id))
+
+  const [operationBefore] = await tx.select().from(cobOperations).where(eq(cobOperations.id, payment.operationId)).limit(1)
+  const balanceBefore = operationBefore ? Number(operationBefore.currentBalance) : 0
+
+  await recalcOperationCache(tx, payment.operationId)
+
+  const [operationAfter] = await tx.select().from(cobOperations).where(eq(cobOperations.id, payment.operationId)).limit(1)
+
+  await logCollectionsEvent(tx, {
+    operationId: payment.operationId,
+    entityType: "payment",
+    entityId: payment.id,
+    eventType: "payment_reversed",
+    description: `Pago de ${payment.amount} ${payment.currencyCode} anulado: ${reason}`,
+    amountDelta: Number(payment.convertedAmount ?? payment.amount),
+    balanceBefore,
+    balanceAfter: operationAfter ? Number(operationAfter.currentBalance) : balanceBefore,
+    performedBy: userId,
+  })
+  return payment
+}
+
+// Edición de un pago ya registrado. Lo que no mueve números (método,
+// referencia, banco, observaciones, comprobante) se corrige en el lugar y
+// queda en el historial. Lo que sí los mueve (monto, moneda, tipo de cambio,
+// fecha, categoría, orden de aplicación) cambia cómo se reparte el pago entre
+// cuotas e intereses, así que se resuelve como una corrección: se anula el
+// pago original y se registra uno nuevo con los datos corregidos, todo en una
+// sola transacción (si algo falla no queda ni anulado ni duplicado). El pago
+// original queda en el historial como "Anulado" con su comprobante.
+interface UpdatePaymentInput extends Omit<RegisterPaymentInput, "operationId" | "lateFeeCharge"> {
+  paymentId: string
+}
+
+export async function updatePayment(data: UpdatePaymentInput, formData: FormData): Promise<{ id: string }> {
+  const session = await requireManage()
+  if (data.amount <= 0) throw new Error("El monto del pago debe ser mayor a cero")
+
+  const [current] = await db.select().from(cobPayments).where(eq(cobPayments.id, data.paymentId)).limit(1)
+  if (!current) throw new Error("Pago no encontrado")
+  if (current.status !== "confirmed") throw new Error("Un pago anulado no se puede editar")
+  if (!current.operationId) throw new Error("El pago no está asociado a una operación")
+  const operationId = current.operationId
+
+  const receipt = formData.get("receipt")
+  const newReceipt = receipt instanceof File && receipt.size > 0 ? receipt : null
+  if (!newReceipt && !current.receiptUrl) {
+    throw new Error("Adjuntá la imagen del comprobante de pago")
+  }
+  const newReceiptUrl = newReceipt ? await saveReceipt(newReceipt) : null
+  const receiptUrl = newReceiptUrl ?? current.receiptUrl!
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      const [operation] = await tx.select().from(cobOperations).where(eq(cobOperations.id, operationId)).limit(1)
+      if (!operation) throw new Error("Operación no encontrada")
+
+      const newCurrency = data.currencyCode || operation.currencyCode
+      const newRate = newCurrency !== operation.currencyCode ? data.exchangeRate ?? null : null
+      const newOrder = data.applicationOrder ?? DEFAULT_APPLICATION_ORDER
+
+      const financialChanged =
+        roundToCents(Number(current.amount)) !== roundToCents(data.amount) ||
+        current.currencyCode !== newCurrency ||
+        (current.exchangeRate != null ? Number(current.exchangeRate) : null) !== newRate ||
+        current.paymentDate !== data.paymentDate ||
+        current.chargeFutureInterest !== (data.chargeFutureInterest === true) ||
+        current.paymentCategory !== (data.paymentCategory ?? current.paymentCategory) ||
+        JSON.stringify(current.applicationOrder ?? DEFAULT_APPLICATION_ORDER) !== JSON.stringify(newOrder)
+
+      if (financialChanged) {
+        await reversePaymentInTx(tx, current.id, "Corrección: reemplazado por un pago con los datos corregidos", session.userId)
+        const newId = await applyPayment(tx, { ...data, operationId, paymentCategory: data.paymentCategory ?? current.paymentCategory }, receiptUrl, session.userId)
+        await logCollectionsEvent(tx, {
+          operationId,
+          entityType: "payment",
+          entityId: newId,
+          eventType: "payment_corrected",
+          description: `Pago corregido: reemplaza al pago de ${current.amount} ${current.currencyCode} del ${current.paymentDate}`,
+          metadata: { replacedPaymentId: current.id },
+          performedBy: session.userId,
+        })
+        return { id: newId, replacedReceipt: false }
+      }
+
+      const next = {
+        paymentMethod: data.paymentMethod,
+        referenceNumber: data.referenceNumber?.trim() || null,
+        bankName: data.bankName?.trim() || null,
+        observations: data.observations?.trim() || null,
+      }
+      const labels: Record<keyof typeof next, string> = {
+        paymentMethod: "método",
+        referenceNumber: "referencia",
+        bankName: "banco",
+        observations: "observaciones",
+      }
+      const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== current[k])
+      if (changed.length === 0 && !newReceiptUrl) return { id: current.id, replacedReceipt: false }
+
+      await tx
+        .update(cobPayments)
+        .set({ ...next, receiptUrl, updatedAt: new Date() })
+        .where(eq(cobPayments.id, current.id))
+
+      const changedLabels = [...changed.map((k) => labels[k]), ...(newReceiptUrl ? ["comprobante"] : [])]
+      await logCollectionsEvent(tx, {
+        operationId,
+        entityType: "payment",
+        entityId: current.id,
+        eventType: "payment_updated",
+        description: `Pago editado (${changedLabels.join(", ")})`,
+        metadata: {
+          before: Object.fromEntries(changed.map((k) => [k, current[k]])),
+          after: Object.fromEntries(changed.map((k) => [k, next[k]])),
+        },
+        performedBy: session.userId,
+      })
+      return { id: current.id, replacedReceipt: newReceiptUrl != null }
+    })
+
+    // El blob viejo se borra recién con la transacción confirmada, y sólo si
+    // quedó huérfano (la corrección financiera lo conserva en el pago anulado).
+    if (result.replacedReceipt && current.receiptUrl) await deleteReceipt(current.receiptUrl).catch(() => {})
+    refresh()
+    return { id: result.id }
+  } catch (err) {
+    if (newReceiptUrl) await deleteReceipt(newReceiptUrl).catch(() => {})
+    throw err
+  }
+}
+
+export async function loadPaymentDetail(paymentId: string) {
+  await requireManage()
+  return getPaymentDetail(paymentId)
 }
 
 // Cancelación de una operación: nunca se borra nada, se marca cancelada
