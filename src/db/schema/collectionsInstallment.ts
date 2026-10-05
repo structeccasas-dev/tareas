@@ -35,6 +35,12 @@ export const cobInstallments = pgTable(
     paidInterest: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     paidOther: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     paidLateFee: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
+    // Interés/cargos que NO se cobraron porque la cuota se pagó por adelantado
+    // (solo capital). interestAmount/otherChargesAmount conservan el valor
+    // original del plan; esto es lo que se perdona encima de él, y reduce
+    // balanceDue. Así el plan nunca se modifica y anular el pago lo revierte.
+    waivedInterest: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
+    waivedOther: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
     paidAmount: numeric({ precision: 14, scale: 2 }).notNull().default("0"),
 
     // total_amount + late_fee_amount - paid_amount, mantenido por el servicio.
